@@ -1,0 +1,77 @@
+# ==========================================
+# HONDA SERVICE TICKET APP - GITIGNORE
+# ==========================================
+
+# Dependencies
+node_modules/
+package-lock.json.bak
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+*.env
+!*.env.example
+*.pem
+*.key
+*.cert
+
+# Production & Packaging Builds (Electron / Node)
+dist/
+build/
+out/
+release/
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+*.zip
+*.tar.gz
+*.blockmap
+*.builder-effective-config.yaml
+
+# Temporary, Cache and Scratch Files
+scratch/
+.cache/
+*.tmp
+*.temp
+*.bak
+
+# Database Backups & Local SQLite Files
+*.db
+*.db-journal
+*.db.bak
+*.sqlite
+*.sqlite3
+data/*.db
+data/*.bak
+data/*.sqlite
+
+# Logs & Debug Output
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Graphify Output & Caches
+graphify-out/
+
+# Testing & Coverage
+coverage/
+.nyc_output/
+
+# IDE, Editor & OS Artifacts
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+graphify-out/

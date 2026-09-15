@@ -1,0 +1,3485 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Honda Service Ticketing & SLA System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" type="image/png" href="img/logo.png">
+</head>
+
+<body>
+  <!-- Top Global Loading Bar for instant visual feedback on network requests -->
+  <div id="topGlobalLoader" class="top-global-loader"></div>
+
+  <!-- TOP APP HEADER -->
+  <header class="app-header">
+    <div class="header-left">
+      <button class="btn-sidebar-toggle" id="btnToggleSidebar" title="Toggle Sidebar (Ctrl+B)">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
+      <div class="brand-badge">
+        <span class="brand-h">H</span>
+        <div class="brand-title">
+          <h1>HONDA <span>SERVICE</span> <span class="app-version-chip">DESKTOP v2.4</span></h1>
+        </div>
+      </div>
+    </div>
+
+    <!-- MINIMAL LIVE METRICS RIBBON -->
+    <div class="metrics-bar" id="metricsBar">
+      <div class="metric-item metric-active-wrap" title="Total Active Tickets">
+        <span class="metric-label">Active</span>
+        <span class="metric-val" id="metricActive">0</span>
+      </div>
+      <span class="metric-sep"></span>
+      <div class="metric-item metric-breached-wrap" title="Exceeded Maximum Working Days">
+        <span class="metric-dot dot-breached"></span>
+        <span class="metric-val text-breached" id="metricBreached">0</span>
+        <span class="metric-label">Breached</span>
+      </div>
+      <div class="metric-item metric-duesoon-wrap" title="Due within 1 Working Day">
+        <span class="metric-dot dot-duesoon"></span>
+        <span class="metric-val text-duesoon" id="metricDueSoon">0</span>
+        <span class="metric-label">Due Soon</span>
+      </div>
+      <div class="metric-item metric-ontrack-wrap" title="Within SLA Limits">
+        <span class="metric-dot dot-ontrack"></span>
+        <span class="metric-val text-ontrack" id="metricWithin">0</span>
+        <span class="metric-label">On Track</span>
+      </div>
+      <span class="metric-sep"></span>
+      <div class="metric-item metric-closed-wrap" title="Delivered & Closed">
+        <span class="metric-dot dot-closed"></span>
+        <span class="metric-val text-closed" id="metricClosed">0</span>
+        <span class="metric-label">Closed</span>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <button class="btn btn-outline btn-compact" id="btnEodReport" title="View SLA Breaches & Activity">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          style="vertical-align:middle;margin-right:3px;">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+        </svg>
+        <span>Alerts</span>
+        <span class="mention-indicator-badge" id="mentionNotificationBadge" style="display: none;">@0</span>
+        <span class="alert-indicator-badge" id="alertNotificationBadge" style="display: none;">0</span>
+      </button>
+      <button class="btn btn-primary btn-compact" id="btnNewTicket" title="Shortcut: Alt+N">
+        <span>+ New Ticket</span>
+        <kbd class="kbd-btn">Alt+N</kbd>
+      </button>
+
+      <!-- User Profile Menu -->
+      <div class="user-profile-menu-wrap" id="userProfileMenuWrap" style="display: none;">
+        <button type="button" class="user-profile-btn" id="btnUserProfile" title="User Profile & Settings">
+          <div class="user-avatar-circle" id="userAvatarCircle">--</div>
+          <div class="user-info-brief">
+            <span class="user-display-name" id="userDisplayName">--</span>
+            <span class="user-role-badge" id="userRoleBadge">--</span>
+          </div>
+          <svg class="user-dropdown-caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <div class="user-profile-dropdown" id="userProfileDropdown" style="display:none;">
+          <div class="user-dropdown-header">
+            <div class="user-dropdown-name" id="dropdownUserName">Administrator</div>
+            <div class="user-dropdown-email" id="dropdownUserRole">System Administrator</div>
+          </div>
+          <div class="user-dropdown-divider"></div>
+          <button type="button" class="user-dropdown-item" id="btnMenuUserManagement" style="display:none;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+            <span>User Management & Permissions</span>
+          </button>
+          <button type="button" class="user-dropdown-item" id="btnMenuChangePassword">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            <span>Change Password</span>
+          </button>
+          <div class="user-dropdown-divider"></div>
+          <button type="button" class="user-dropdown-item text-danger" id="btnMenuLogout">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <polyline points="16 17 21 12 16 7"></polyline>
+              <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+            <span>Sign Out</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- APP MAIN LAYOUT (Collapsible Sidebar + Main Content Area) -->
+  <div class="app-layout" id="appLayout">
+
+    <!-- COLLAPSIBLE SIDEBAR -->
+    <aside class="app-sidebar" id="appSidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-header-title">NAVIGATION</span>
+        <button type="button" class="sidebar-toggle-chevron" id="btnCollapseSidebar" title="Collapse sidebar">
+          <span class="chevron-icon">‹</span>
+        </button>
+      </div>
+
+      <nav class="sidebar-nav">
+        <!-- 1. OPERATIONS / BOARD -->
+        <a href="javascript:void(0)" class="sidebar-item active" data-nav="board" id="navBoard"
+          title="Operations Board (Kanban & Pipeline)">
+          <span class="sidebar-icon">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="9"></rect>
+              <rect x="14" y="3" width="7" height="5"></rect>
+              <rect x="14" y="12" width="7" height="9"></rect>
+              <rect x="3" y="16" width="7" height="5"></rect>
+            </svg>
+          </span>
+          <span class="sidebar-label">Operations Board</span>
+        </a>
+
+        <!-- 2. CUSTOMERS -->
+        <a href="javascript:void(0)" class="sidebar-item" data-nav="customers" id="navCustomers"
+          title="Customers Directory">
+          <span class="sidebar-icon">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+          </span>
+          <span class="sidebar-label">Customers</span>
+          <span class="sidebar-badge" id="badgeCustomerCount">0</span>
+        </a>
+
+        <!-- 3. VEHICLES -->
+        <a href="javascript:void(0)" class="sidebar-item" data-nav="vehicles" id="navVehicles"
+          title="Vehicles Fleet Directory">
+          <span class="sidebar-icon">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 17a2 2 0 1 0 4 0 2 2 0 1 0-4 0m10 0a2 2 0 1 0 4 0 2 2 0 1 0-4 0"></path>
+              <path d="M5 17H3v-4l2-5h9l4 5h1a2 2 0 0 1 2 2v2h-2m-4 0H9"></path>
+            </svg>
+          </span>
+          <span class="sidebar-label">Vehicles</span>
+          <span class="sidebar-badge" id="badgeVehiclesCount">0</span>
+        </a>
+
+        <!-- 4. PARTS & INVENTORY -->
+        <a href="javascript:void(0)" class="sidebar-item" data-nav="parts" id="navParts"
+          title="Parts & Inventory Management">
+          <span class="sidebar-icon">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path
+                d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z">
+              </path>
+            </svg>
+          </span>
+          <span class="sidebar-label">Parts & Orders</span>
+          <span class="sidebar-badge" id="badgePartsCount">0</span>
+        </a>
+
+        <!-- 5. INSURANCE & SURVEYORS -->
+        <a href="javascript:void(0)" class="sidebar-item" data-nav="insurance" id="navInsurance"
+          title="Insurance & Surveyors Directory">
+          <span class="sidebar-icon">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+          </span>
+          <span class="sidebar-label">Insurance</span>
+          <span class="sidebar-badge" id="badgeInsuranceCount">0</span>
+        </a>
+
+        <!-- 4. SETTINGS > HOLIDAYS (Accordion Group) -->
+        <div class="sidebar-group open" id="groupSettings">
+          <div class="sidebar-item sidebar-group-trigger" id="btnSettingsTrigger" title="Settings">
+            <span class="sidebar-icon">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path
+                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                </path>
+              </svg>
+            </span>
+            <span class="sidebar-label">Settings</span>
+            <span class="group-chevron" id="settingsChevron">▾</span>
+          </div>
+          <div class="sidebar-sublist" id="settingsSublist">
+            <a href="javascript:void(0)" class="sidebar-subitem" data-nav="sla-settings" id="navSlaSettings"
+              title="Pipeline Stage SLA Timing Configuration">
+              <span class="subitem-dot"></span>
+              <span class="sidebar-label">Pipeline SLA</span>
+            </a>
+            <a href="javascript:void(0)" class="sidebar-subitem" data-nav="holidays" id="navHolidays"
+              title="Workshop Holidays">
+              <span class="subitem-dot"></span>
+              <span class="sidebar-label">Holidays</span>
+              <span class="sidebar-badge-sub" id="badgeHolidaysCount">0</span>
+            </a>
+          </div>
+        </div>
+      </nav>
+
+      <!-- SIDEBAR FOOTER (SLA Schedule Info) -->
+      <div class="sidebar-footer">
+        <div class="sidebar-sla-pill">
+          <span class="pulse-indicator"></span>
+          <span class="sla-pill-text">Mon–Sat Working Days</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN WORKING AREA -->
+    <div class="app-main-area">
+
+      <!-- CONTROLS & FILTER BAR (Active for Operations Board) -->
+      <nav class="controls-bar" id="controlsBar">
+        <div class="controls-left">
+          <!-- BRANCH MULTI-SELECT FILTER -->
+          <div class="control-filter-item" id="outletFilterContainer"></div>
+
+          <!-- SEARCH INPUT WITH ALT+F SUGGESTIVE ENGINE -->
+          <div class="control-filter-item search-group-compact rel-pos">
+            <div class="input-with-icon">
+              <svg class="search-icon-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input type="text" id="searchInput" class="form-input input-compact"
+                placeholder="Search ticket, VIN, customer..." autocomplete="off">
+              <kbd class="kbd-search-hint" title="Press Alt+F to search">Alt+F</kbd>
+            </div>
+            <div class="search-suggest-box" id="searchSuggestBox"></div>
+          </div>
+
+          <!-- SLA STATUS MULTI-SELECT FILTER -->
+          <div class="control-filter-item" id="slaFilterContainer"></div>
+
+          <!-- STAGE MULTI-SELECT FILTER -->
+          <div class="control-filter-item" id="stageFilterContainer"></div>
+
+          <!-- SORT ORDER (DEFAULT: SLA DESCENDING) -->
+          <div class="control-filter-item">
+            <select id="sortFilter" class="form-select select-compact" title="Sort Tickets">
+              <option value="sla_desc" selected>Sort: SLA (High to Low)</option>
+              <option value="sla_asc">Sort: SLA (Low to High)</option>
+              <option value="id_desc">Sort: Newest First</option>
+              <option value="id_asc">Sort: Oldest First</option>
+              <option value="customer_asc">Sort: Customer (A to Z)</option>
+              <option value="customer_desc">Sort: Customer (Z to A)</option>
+              <option value="model_asc">Sort: Vehicle Model</option>
+              <option value="stage_asc">Sort: Stage (1 to 13)</option>
+              <option value="stage_desc">Sort: Stage (13 to 1)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="controls-right">
+          <!-- VIEW SWITCHER -->
+          <div class="view-switcher">
+            <button class="btn-toggle active" data-view="kanban" id="viewKanbanBtn">Kanban</button>
+            <button class="btn-toggle" data-view="pipeline" id="viewPipelineBtn">Pipeline</button>
+            <button class="btn-toggle" data-view="table" id="viewTableBtn">Table</button>
+          </div>
+        </div>
+      </nav>
+
+      <!-- MAIN VIEW CONTAINER -->
+      <main class="main-content">
+
+        <!-- SECTION 1: OPERATIONS BOARD (Kanban, Pipeline, Table) -->
+        <div id="boardContainer" class="main-subview active">
+          <!-- 1. KANBAN BOARD VIEW -->
+          <section id="kanbanView" class="view-panel active">
+            <div class="kanban-board">
+
+              <!-- COLUMN 1: OPEN -->
+              <div class="kanban-column" id="colOpen" data-column="OPEN">
+                <div class="column-header">
+                  <div class="col-title-wrap">
+                    <span class="col-dot dot-open"></span>
+                    <h2>OPEN</h2>
+                    <span class="col-avg-td" id="avgTdOpen">( avg td: 0 )</span>
+                    <span class="col-badge" id="countOpen">0</span>
+                  </div>
+                  <p class="col-sub">Stage 1: Vehicle Arrival</p>
+                </div>
+                <div class="kanban-cards" id="cardsOpen">
+                  <!-- Rendered by JS -->
+                </div>
+              </div>
+
+              <!-- COLUMN 2: IN PROGRESS -->
+              <div class="kanban-column" id="colInProgress" data-column="IN_PROGRESS">
+                <div class="column-header">
+                  <div class="col-title-wrap">
+                    <span class="col-dot dot-inprogress"></span>
+                    <h2>IN PROGRESS</h2>
+                    <span class="col-avg-td" id="avgTdInProgress">( avg td: 0 )</span>
+                    <span class="col-badge" id="countInProgress">0</span>
+                  </div>
+                  <p class="col-sub">Stages 2–11: Estimates, Survey, Repairs, Invoicing</p>
+                </div>
+                <div class="kanban-cards" id="cardsInProgress">
+                  <!-- Rendered by JS -->
+                </div>
+              </div>
+
+              <!-- COLUMN 3: CLOSED -->
+              <div class="kanban-column" id="colClosed" data-column="CLOSED">
+                <div class="column-header">
+                  <div class="col-title-wrap">
+                    <span class="col-dot dot-closed"></span>
+                    <h2>CLOSED</h2>
+                    <span class="col-avg-td" id="avgTdClosed">( avg td: 0 )</span>
+                    <span class="col-badge" id="countClosed">0</span>
+                    <button type="button" class="btn-col-collapse" id="btnToggleClosedCol"
+                      title="Collapse / Expand Closed Column">▾</button>
+                  </div>
+                  <div class="col-subrow">
+                    <p class="col-sub">Stage 13: Customer Delivery</p>
+                    <div class="topn-control-wrap">
+                      <span class="topn-label">Show</span>
+                      <div class="topn-pills" id="closedPillGroup">
+                        <button type="button" class="topn-pill active" data-limit="20">20</button>
+                        <button type="button" class="topn-pill" data-limit="50">50</button>
+                        <button type="button" class="topn-pill" data-limit="ALL">All</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="kanban-cards" id="cardsClosed">
+                  <!-- Rendered by JS -->
+                </div>
+              </div>
+
+            </div>
+          </section>
+
+          <!-- 2. PIPELINE VIEW (All 12 Stages grouped) -->
+          <section id="pipelineView" class="view-panel" style="display: none;">
+            <div class="pipeline-board" id="pipelineContainer">
+              <!-- Rendered by JS -->
+            </div>
+          </section>
+
+          <!-- 3. TABLE VIEW -->
+          <section id="tableView" class="view-panel" style="display: none;">
+            <!-- TABLE TOOLBAR (Date filter, Page size, CSV Export) -->
+            <div class="table-view-toolbar">
+              <div class="tv-toolbar-left">
+                <!-- COMPACT DATE RANGE FILTER FORM -->
+                <div class="tv-tool-item tv-date-filter-group" id="tblDateFilterGroup">
+                  <label for="tblDateField" class="tv-label">Date Filter:</label>
+                  <div class="compact-date-range-form">
+                    <select id="tblDateField" class="form-select select-compact" title="Date field to filter on">
+                      <option value="arrival_date" selected>Created / Arrival Date</option>
+                      <option value="current_stage_entered_at">Stage Entered Date</option>
+                      <option value="estimate_date">Estimate Date</option>
+                      <option value="survey_date">Survey Date</option>
+                      <option value="approval_date">Approval Date</option>
+                      <option value="parts_order_date">Parts Order Date</option>
+                      <option value="work_complete_date">Work Done Date</option>
+                    </select>
+                    <select id="tblDatePreset" class="form-select select-compact" title="Quick date preset">
+                      <option value="ALL" selected>All Time</option>
+                      <option value="TODAY">Today</option>
+                      <option value="YESTERDAY">Yesterday</option>
+                      <option value="THIS_WEEK">This Week</option>
+                      <option value="THIS_MONTH">This Month</option>
+                      <option value="CUSTOM">Custom Range...</option>
+                    </select>
+                    <div id="tblCustomDateWrap" class="compact-custom-dates" style="display: none;">
+                      <input type="date" id="tblDateStart" class="form-input input-compact" title="Start Date">
+                      <span class="date-sep">–</span>
+                      <input type="date" id="tblDateEnd" class="form-input input-compact" title="End Date">
+                    </div>
+                    <button type="button" class="btn-xs btn-outline" id="btnTblDateClear" style="display: none;" title="Reset Date Filter">✕</button>
+                  </div>
+                </div>
+
+                <div class="tv-tool-item">
+                  <label for="tblPageSize" class="tv-label">Show:</label>
+                  <select id="tblPageSize" class="form-select select-compact">
+                    <option value="10">10 rows</option>
+                    <option value="25" selected>25 rows</option>
+                    <option value="50">50 rows</option>
+                    <option value="100">100 rows</option>
+                    <option value="ALL">All rows</option>
+                  </select>
+                </div>
+              </div>
+              <div class="tv-toolbar-right">
+                <button type="button" class="btn btn-outline btn-compact" id="btnExportCsv"
+                  title="Export current tickets to CSV">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    style="vertical-align:middle;margin-right:4px;">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  <span>Download as CSV</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th data-sort-key="ticket_number" class="sortable-th" title="Sort by Ticket #">Ticket # <span class="th-sort-icon"></span></th>
+                    <th data-sort-key="branch_name" class="sortable-th" title="Sort by Branch">Branch <span class="th-sort-icon"></span></th>
+                    <th data-sort-key="customer_name" class="sortable-th" title="Sort by Customer">Customer <span class="th-sort-icon"></span></th>
+                    <th>Phone</th>
+                    <th data-sort-key="model" class="sortable-th" title="Sort by Vehicle">Vehicle / Reg No <span class="th-sort-icon"></span></th>
+                    <th>Chassis</th>
+                    <th data-sort-key="stage" class="sortable-th" title="Sort by Stage">Current Stage <span class="th-sort-icon"></span></th>
+                    <th data-sort-key="status" class="sortable-th" title="Sort by Column">Column <span class="th-sort-icon"></span></th>
+                    <th data-sort-key="entered_date" class="sortable-th" title="Sort by Entered Date">Entered Date <span class="th-sort-icon"></span></th>
+                    <th data-sort-key="aging" class="sortable-th" title="Sort by Aging">Aging <span class="th-sort-icon"></span></th>
+                    <th>Max SLA</th>
+                    <th data-sort-key="sla_status" class="sortable-th" title="Sort by SLA Status">SLA Status <span class="th-sort-icon"></span></th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="tableBody">
+                  <!-- Rendered by JS -->
+                </tbody>
+              </table>
+            </div>
+
+            <!-- TABLE PAGINATION FOOTER -->
+            <div class="table-pagination-footer" id="tablePaginationFooter">
+              <div class="tp-pagination-info" id="tblPaginationInfo">Showing 0–0 of 0 tickets</div>
+              <div class="tp-pagination-controls">
+                <button type="button" class="btn-page-nav" id="btnTblFirstPage" title="First Page">«</button>
+                <button type="button" class="btn-page-nav" id="btnTblPrevPage" title="Previous Page">‹ Prev</button>
+                <div class="tp-page-numbers" id="tblPageNumbers">
+                  <!-- Generated by JS -->
+                </div>
+                <button type="button" class="btn-page-nav" id="btnTblNextPage" title="Next Page">Next ›</button>
+                <button type="button" class="btn-page-nav" id="btnTblLastPage" title="Last Page">»</button>
+              </div>
+            </div>
+          </section>
+        </div>
+        <!-- SECTION 1B: DEDICATED INDIVIDUAL TICKET PAGE -->
+        <section id="ticketPageView" class="main-subview" style="display: none;">
+          <!-- Top Header Bar with Breadcrumb and Actions -->
+          <div class="tp-header">
+            <div class="tp-header-left">
+              <button type="button" class="btn btn-outline btn-compact" id="tpBtnBack" title="Back to Operations Board">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="15 18 9 12 15 6"></polyline>
+                </svg>
+                <span>Back to Board</span>
+              </button>
+              <div class="tp-title-group">
+                <span class="tp-ticket-id" id="tpTicketNumber">SRV-2026-0001</span>
+                <button type="button" class="tp-copy-icon-btn" id="tpBtnCopyTicketNo" title="Copy Ticket Number">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                </button>
+                <span class="tp-branch-badge" id="tpBranchName">Indiranagar</span>
+              </div>
+            </div>
+
+            <!-- Quick Status Ribbon -->
+            <div class="tp-status-ribbon">
+              <div class="tp-status-pill">
+                <span class="tp-pill-label">Stage</span>
+                <span class="tp-stage-badge" id="tpStageBadge">#1 Vehicle Arrival</span>
+              </div>
+              <div class="tp-status-pill">
+                <span class="tp-pill-label">SLA</span>
+                <span class="tp-sla-badge" id="tpSlaBadge">
+                  <span class="sla-dot"></span>
+                  <span id="tpSlaText">Within SLA</span>
+                </span>
+              </div>
+              <div class="tp-status-pill">
+                <span class="tp-pill-label">Aging</span>
+                <span class="tp-aging-val" id="tpAgingText">1 / 1 WD</span>
+              </div>
+            </div>
+
+            <div class="tp-header-actions">
+              <button type="button" class="btn btn-primary btn-compact" id="tpBtnAdvance" title="Advance to Next Stage">
+                <span>Next Stage →</span>
+              </button>
+              <button type="button" class="btn btn-outline btn-compact" id="tpBtnBypass"
+                title="Direct Customer Delivery Bypass">
+                <span>Bypass</span>
+              </button>
+              <button type="button" class="btn btn-outline btn-compact" id="tpBtnEdit"
+                title="Safely Edit Ticket Details & Scope">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 20h9"></path>
+                  <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                </svg>
+                <span>Edit Details</span>
+              </button>
+              <button type="button" class="btn btn-danger-outline btn-compact" id="tpBtnDelete"
+                title="Permanently Delete Ticket">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+                <span>Delete</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Main 2-Column Content Grid -->
+          <div class="tp-grid">
+            <!-- Left Column: Pure Read-Only Display Cards -->
+            <div class="tp-main-col">
+              <input type="hidden" id="tpId">
+              <!-- Card 1: Customer Profile -->
+              <div class="tp-card" id="tpCardCustomer">
+                <div class="tp-card-header">
+                  <div class="tp-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                    <span>Customer & Contact Profile</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="tp-crm-pill" title="Master customer account in Honda CRM Directory">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="12" cy="7" r="4"></circle>
+                      </svg>
+                      CRM Record
+                    </span>
+                    <button type="button" class="tp-card-edit-btn" id="tpBtnEditCustomer"
+                      title="Edit or Switch Customer">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                      </svg>
+                      <span>Edit</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Display View -->
+                <div class="tp-card-body" id="tpCustomerViewBody">
+                  <div class="tp-prop-grid">
+                    <div class="tp-prop-cell">
+                      <span class="tp-prop-label">Customer Name</span>
+                      <div class="tp-prop-val-row">
+                        <span class="tp-avatar-circle" id="tpCustomerInitials">DC</span>
+                        <span class="tp-prop-val tp-strong" id="tpCustomerNameDisp">—</span>
+                      </div>
+                    </div>
+                    <div class="tp-prop-cell">
+                      <span class="tp-prop-label">Primary Phone</span>
+                      <div class="tp-prop-val-row">
+                        <a href="#" class="tp-phone-badge" id="tpCustomerPhoneLink" title="Click to call">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path
+                              d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z">
+                            </path>
+                          </svg>
+                          <span id="tpCustomerPhoneDisp">—</span>
+                        </a>
+                        <button type="button" class="tp-copy-icon-btn" id="tpBtnCopyPhone" title="Copy Phone Number">
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Inline Edit Form View -->
+                <div class="tp-card-body tp-inline-edit-body" id="tpCustomerEditBody" style="display: none;">
+                  <div class="tp-switch-customer-box" style="margin-bottom: 12px; position: relative;">
+                    <label
+                      style="font-size: 11px; font-weight: 700; color: #1e40af; text-transform: uppercase; letter-spacing: 0.3px; display: flex; align-items: center; gap: 5px; margin-bottom: 4px;">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                      </svg>
+                      Quick Switch Customer (CRM Lookup)
+                    </label>
+                    <input type="text" id="tpInputSwitchCustomer" class="form-input form-input-sm"
+                      placeholder="Type name, phone or vehicle plate to select existing customer..." autocomplete="off">
+                    <div class="suggestions-box" id="tpSwitchCustomerSuggestions"
+                      style="display:none; position:absolute; top:100%; left:0; right:0; z-index:100;"></div>
+                  </div>
+
+                  <div class="tp-inline-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div class="form-group" style="margin-bottom: 0;">
+                      <label for="tpInputCustName" style="font-size: 11px; font-weight: 600; color: #475569;">Customer
+                        Name <span class="req">*</span></label>
+                      <input type="text" id="tpInputCustName" class="form-input form-input-sm" required>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                      <label for="tpInputCustPhone" style="font-size: 11px; font-weight: 600; color: #475569;">Primary
+                        Phone <span class="req">*</span></label>
+                      <input type="tel" id="tpInputCustPhone" class="form-input form-input-sm" required>
+                    </div>
+                  </div>
+
+                  <div class="tp-inline-actions"
+                    style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; padding-top: 8px; border-top: 1px solid #f1f5f9;">
+                    <button type="button" class="btn btn-xs btn-outline" id="tpBtnCancelEditCustomer">Cancel</button>
+                    <button type="button" class="btn btn-xs btn-primary" id="tpBtnSaveCustomer">Save Customer</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 2: Vehicle Specification -->
+              <div class="tp-card" id="tpCardVehicle">
+                <div class="tp-card-header">
+                  <div class="tp-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="1" y="3" width="15" height="13"></rect>
+                      <polygon points="16 8 20 8 23 11 23 16 16 16 8"></polygon>
+                      <circle cx="5.5" cy="18.5" r="2.5"></circle>
+                      <circle cx="18.5" cy="18.5" r="2.5"></circle>
+                    </svg>
+                    <span>Vehicle Specification</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="tp-vehicle-tag" id="tpVehicleModelTag">Honda Model</span>
+                    <button type="button" class="tp-card-edit-btn" id="tpBtnEditVehicle" title="Edit Vehicle Details">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                      </svg>
+                      <span>Edit</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Display View -->
+                <div class="tp-card-body" id="tpVehicleViewBody">
+                  <div class="tp-prop-grid">
+                    <div class="tp-prop-cell">
+                      <span class="tp-prop-label">Model Name</span>
+                      <span class="tp-prop-val tp-strong" id="tpVehicleNameDisp">—</span>
+                    </div>
+                    <div class="tp-prop-cell">
+                      <span class="tp-prop-label">Color / Paint Code</span>
+                      <div class="tp-prop-val-row">
+                        <span class="tp-color-swatch-dot" id="tpVehicleColorDot"></span>
+                        <span class="tp-prop-val" id="tpVehicleColorDisp">—</span>
+                      </div>
+                    </div>
+                    <div class="tp-prop-cell">
+                      <span class="tp-prop-label">Registration Number</span>
+                      <div class="tp-prop-val-row">
+                        <span class="tp-license-plate unregistered" id="tpVehicleNoDisp">Not Registered</span>
+                      </div>
+                    </div>
+                    <div class="tp-prop-cell">
+                      <span class="tp-prop-label">Chassis / VIN (17 Digits)</span>
+                      <div class="tp-prop-val-row">
+                        <span class="tp-chassis-code" id="tpChassisNumberDisp">—</span>
+                        <button type="button" class="tp-copy-icon-btn" id="tpBtnCopyChassis" title="Copy Chassis VIN">
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Inline Edit Form View -->
+                <div class="tp-card-body tp-inline-edit-body" id="tpVehicleEditBody" style="display: none;">
+                  <div class="tp-inline-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div class="form-group" style="margin-bottom: 0;">
+                      <label for="tpInputVehicleModel" style="font-size: 11px; font-weight: 600; color: #475569;">Model
+                        Name <span class="req">*</span></label>
+                      <input type="text" id="tpInputVehicleModel" class="form-input form-input-sm"
+                        placeholder="e.g. Honda City ZX" required>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                      <label for="tpInputVehicleColor" style="font-size: 11px; font-weight: 600; color: #475569;">Color
+                        / Paint Code</label>
+                      <input type="text" id="tpInputVehicleColor" class="form-input form-input-sm"
+                        placeholder="e.g. Radiant Red">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                      <label for="tpInputVehicleNo"
+                        style="font-size: 11px; font-weight: 600; color: #475569;">Registration Number</label>
+                      <input type="text" id="tpInputVehicleNo" class="form-input form-input-sm text-uppercase"
+                        placeholder="e.g. KA-01-AB-1234">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                      <label for="tpInputChassis" style="font-size: 11px; font-weight: 600; color: #475569;">Chassis /
+                        VIN</label>
+                      <input type="text" id="tpInputChassis" class="form-input form-input-sm text-uppercase"
+                        placeholder="e.g. MAKGM6681KH029182">
+                    </div>
+                  </div>
+                  <div class="tp-inline-actions"
+                    style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; padding-top: 8px; border-top: 1px solid #f1f5f9;">
+                    <button type="button" class="btn btn-xs btn-outline" id="tpBtnCancelEditVehicle">Cancel</button>
+                    <button type="button" class="btn btn-xs btn-primary" id="tpBtnSaveVehicle">Save Vehicle</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 3: Estimates & Scope of Work (Progressive: Stage >= 2 or prefilled) -->
+              <div class="tp-card" id="tpCardEstimates" style="display: none;">
+                <div class="tp-card-header">
+                  <div class="tp-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"></path>
+                      <line x1="12" y1="6" x2="12" y2="8"></line>
+                      <line x1="12" y1="16" x2="12" y2="18"></line>
+                    </svg>
+                    <span>Estimates & Damaged Parts Breakdown</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <button type="button" class="tp-btn-icon-note" id="tpBtnPartsNote"
+                      title="Add or edit parts delay / paint job note">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                      </svg>
+                      <span class="tp-note-status-dot"></span>
+                    </button>
+                    <div class="tp-est-amount-badge">
+                      <span class="tp-est-curr">₹</span>
+                      <span class="tp-est-num" id="tpEstimatedCostDisp">0</span>
+                    </div>
+                    <button type="button" class="tp-card-edit-btn" id="tpBtnEditEstimates"
+                      title="Edit Estimates & Parts">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                      </svg>
+                      <span>Edit</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Display View -->
+                <div class="tp-card-body" id="tpEstimatesViewBody">
+                  <div id="tpPartsNoteWrap"></div>
+                  <div class="tp-scope-container" id="tpPartsContainer">
+                    <span class="tp-prop-label">Damaged Parts & Scope of Work</span>
+                    <div class="tp-scope-box" id="tpDamagedPartsDisp">
+                      <span class="tp-empty-hint">No damaged parts or scope logged yet.</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Inline Edit Form View -->
+                <div class="tp-card-body tp-inline-edit-body" id="tpEstimatesEditBody" style="display: none;">
+                  <div class="parts-builder-section" style="margin-bottom: 12px;">
+                    <div class="parts-builder-header">
+                      <label
+                        style="font-weight: 700; font-size: 11px; text-transform: uppercase; color: #475569; letter-spacing: 0.3px;">
+                        Damaged Parts (Row by Row)
+                      </label>
+                      <span style="font-size: 11px; color: #94a3b8;">Search catalog or add items</span>
+                    </div>
+                    <div class="table-container"
+                      style="margin-top: 6px; margin-bottom: 8px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); overflow: visible;">
+                      <table class="parts-builder-table" id="tpInlinePartsTable">
+                        <thead>
+                          <tr>
+                            <th style="width: 44%;">Part Item / Description</th>
+                            <th style="width: 14%; text-align: center;">Qty</th>
+                            <th style="width: 20%; text-align: right;">Unit Price (₹)</th>
+                            <th style="width: 22%; text-align: right;">Amount (₹)</th>
+                            <th style="width: 36px; text-align: center;"></th>
+                          </tr>
+                        </thead>
+                        <tbody id="tpInlinePartsTableBody"></tbody>
+                      </table>
+                    </div>
+                    <div class="parts-builder-actions">
+                      <button type="button" class="btn btn-outline btn-xs" id="tpBtnInlineAddPartRow">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                          stroke-width="2">
+                          <line x1="12" y1="5" x2="12" y2="19"></line>
+                          <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        <span>Add Part Item</span>
+                      </button>
+                      <div class="parts-total-summary">
+                        <span class="parts-total-label">Parts Subtotal:</span>
+                        <span class="parts-total-val" id="tpInlinePartsTotalVal">₹0</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="tp-inline-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div class="form-group" style="grid-column: 1 / -1; margin-bottom: 0;">
+                      <label for="tpInputJobNotes" style="font-size: 11px; font-weight: 600; color: #475569;">Additional
+                        Scope & Labor Remarks</label>
+                      <textarea id="tpInputJobNotes" class="form-textarea" rows="2"
+                        placeholder="Bodywork scope, painting or labor notes..."></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                      <label for="tpInputEstimatedCost" style="font-size: 11px; font-weight: 600; color: #475569;">Total
+                        Estimated Repair Cost (₹)</label>
+                      <input type="number" id="tpInputEstimatedCost" class="form-input form-input-sm" step="any"
+                        placeholder="0">
+                    </div>
+                  </div>
+                  <div class="tp-inline-actions"
+                    style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; padding-top: 8px; border-top: 1px solid #f1f5f9;">
+                    <button type="button" class="btn btn-xs btn-outline" id="tpBtnCancelEditEstimates">Cancel</button>
+                    <button type="button" class="btn btn-xs btn-primary" id="tpBtnSaveEstimates">Save Estimates</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 4: Insurance & Surveyor (Progressive: Stage >= 3 or prefilled) -->
+              <div class="tp-card" id="tpCardInsurance" style="display: none;">
+                <div class="tp-card-header">
+                  <div class="tp-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                    <span>Insurance & Surveyor Information</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="tp-partner-badge" id="tpInsuranceBadge">Partner Claim</span>
+                    <button type="button" class="tp-card-edit-btn" id="tpBtnEditInsurance"
+                      title="Edit Insurance & Surveyor">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M12 20h9"></path>
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                      </svg>
+                      <span>Edit</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Display View -->
+                <div class="tp-card-body" id="tpInsuranceViewBody">
+                  <div class="tp-prop-grid">
+                    <div class="tp-prop-cell tp-span-full">
+                      <span class="tp-prop-label">Insurance Company / Partner</span>
+                      <span class="tp-prop-val tp-strong" id="tpInsuranceCompanyDisp">—</span>
+                    </div>
+                    <div class="tp-prop-cell">
+                      <span class="tp-prop-label">Assigned Surveyor</span>
+                      <span class="tp-prop-val" id="tpSurveyorNameDisp">—</span>
+                    </div>
+                    <div class="tp-prop-cell">
+                      <span class="tp-prop-label">Surveyor Phone</span>
+                      <div class="tp-prop-val-row">
+                        <span class="tp-prop-val" id="tpSurveyorPhoneDisp">—</span>
+                        <button type="button" class="tp-copy-icon-btn" id="tpBtnCopySurveyorPhone"
+                          title="Copy Surveyor Phone">
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Inline Edit Form View -->
+                <div class="tp-card-body tp-inline-edit-body" id="tpInsuranceEditBody" style="display: none;">
+                  <div class="tp-inline-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div class="form-group rel-pos" style="grid-column: 1 / -1; margin-bottom: 0;">
+                      <label for="tpInputInsuranceCompany"
+                        style="font-size: 11px; font-weight: 600; color: #475569;">Insurance Company / Partner</label>
+                      <input type="text" id="tpInputInsuranceCompany" class="form-input form-input-sm"
+                        placeholder="e.g. ICICI Lombard General Insurance" autocomplete="off">
+                      <div class="suggestions-box" id="tpSuggestInsurers"
+                        style="display:none; position:absolute; top:100%; left:0; right:0; z-index:100;"></div>
+                    </div>
+                    <div class="form-group rel-pos" style="margin-bottom: 0;">
+                      <label for="tpInputSurveyorName"
+                        style="font-size: 11px; font-weight: 600; color: #475569;">Surveyor Name</label>
+                      <input type="text" id="tpInputSurveyorName" class="form-input form-input-sm"
+                        placeholder="e.g. Rajesh Sharma" autocomplete="off">
+                      <div class="suggestions-box" id="tpSuggestSurveyors"
+                        style="display:none; position:absolute; top:100%; left:0; right:0; z-index:100;"></div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                      <label for="tpInputSurveyorPhone"
+                        style="font-size: 11px; font-weight: 600; color: #475569;">Surveyor Phone</label>
+                      <input type="tel" id="tpInputSurveyorPhone" class="form-input form-input-sm"
+                        placeholder="e.g. 9845012345">
+                    </div>
+                  </div>
+                  <div class="tp-inline-actions"
+                    style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; padding-top: 8px; border-top: 1px solid #f1f5f9;">
+                    <button type="button" class="btn btn-xs btn-outline" id="tpBtnCancelEditInsurance">Cancel</button>
+                    <button type="button" class="btn btn-xs btn-primary" id="tpBtnSaveInsurance">Save Insurance</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 5: Notes & Collaborative Comments Thread -->
+              <div class="tp-card" id="tpCardComments">
+                <div class="tp-card-header">
+                  <div class="tp-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <span>Notes & Comments</span>
+                    <span class="tp-comment-pill" id="tpCommentsCountBadge">0</span>
+                  </div>
+                </div>
+                <div class="tp-card-body">
+                  <!-- Note Composer -->
+                  <div class="tp-comment-composer">
+                    <div class="tp-composer-meta">
+                      <span class="tp-composer-user" id="commentComposerAuthor">Service Staff</span>
+                      <span class="tp-composer-tip">Tip: Type <code>@</code> to mention a teammate</span>
+                    </div>
+                    <div style="position: relative;">
+                      <textarea id="inputNewTicketComment" class="form-textarea tp-comment-textarea" rows="2"
+                        placeholder="Add a progress update, parts delay note, or mention someone (@name)..."></textarea>
+                      <div class="mention-dropdown-box" id="mentionDropdownBox" style="display: none;"></div>
+                    </div>
+                    <div class="tp-composer-toolbar">
+                      <div class="tp-composer-helpers">
+                        <button type="button" class="btn btn-outline btn-xs" id="btnComposerMention">
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:2px;">
+                            <circle cx="12" cy="12" r="4"></circle>
+                            <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"></path>
+                          </svg>
+                          Mention
+                        </button>
+                      </div>
+                      <button type="button" class="btn btn-primary btn-xs" id="btnSubmitTicketComment">
+                        <span>Post Note</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Threaded Comments Stream -->
+                  <div class="tp-comments-stream" id="tpCommentsStream">
+                    <!-- Rendered by JS -->
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Column: Interactive 13-Stage Pipeline Stepper & Milestone Audit -->
+            <div class="tp-side-col">
+              <div class="tp-card">
+                <div class="tp-card-header">
+                  <div class="tp-card-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                    </svg>
+                    <span>Timeline</span>
+                  </div>
+                </div>
+                <div class="tp-card-body">
+                  <div class="tp-timeline-stepper" id="tpTimelineStepper">
+                    <!-- Rendered dynamically by JS -->
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION 2: DEDICATED CUSTOMER COMMAND CENTER -->
+        <section id="customersView" class="main-subview" style="display: none;">
+          <div class="subview-header">
+            <div class="subview-title-wrap">
+              <h2>Customers</h2>
+            </div>
+            <div class="subview-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="btnOpenNewCustomerModal">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="8.5" cy="7.5" r="4"></circle>
+                  <line x1="20" y1="8" x2="20" y2="14"></line>
+                  <line x1="23" y1="11" x2="17" y2="11"></line>
+                </svg>
+                + Register Customer
+              </button>
+            </div>
+          </div>
+
+          <!-- MASTER-DETAIL SPLIT WORKSPACE -->
+          <div class="hub-split-layout">
+            <!-- Left Master List Column -->
+            <div class="hub-master-col">
+              <div class="hub-search-wrap">
+                <div class="subview-search-box" style="width: 100%;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                  <input type="text" id="customerSearchInput" class="form-input"
+                    placeholder="Search by name, phone, plate, VIN...">
+                </div>
+                <div class="hub-filter-chips" id="custFilterChips">
+                  <button type="button" class="hub-chip active" data-filter="all">All</button>
+                  <button type="button" class="hub-chip" data-filter="active">Active Tickets</button>
+                  <button type="button" class="hub-chip" data-filter="multi">Multi-Vehicle</button>
+                  <div id="custBranchFilterContainer" style="display: inline-block;"></div>
+                </div>
+              </div>
+
+              <div class="hub-master-list" id="customersMasterList">
+                <!-- Rendered by JS -->
+              </div>
+            </div>
+
+            <!-- Right Detail Dossier Column -->
+            <div class="hub-detail-col" id="customerDetailDossier">
+              <!-- Rendered by JS upon selection -->
+              <div class="hub-empty-state">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+                <p>Select a customer profile to view their vehicles and service ticket history.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION: DEDICATED VEHICLES COMMAND CENTER -->
+        <section id="vehiclesView" class="main-subview" style="display: none;">
+          <div class="subview-header">
+            <div class="subview-title-wrap">
+              <div class="hub-pill-tag tag-vehicles">Fleet Directory</div>
+            </div>
+            <div class="subview-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="btnOpenRegisterVehicleModal">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M5 17a2 2 0 1 0 4 0 2 2 0 1 0-4 0m10 0a2 2 0 1 0 4 0 2 2 0 1 0-4 0"></path>
+                  <path d="M5 17H3v-4l2-5h9l4 5h1a2 2 0 0 1 2 2v2h-2m-4 0H9"></path>
+                </svg>
+                + Register Vehicle
+              </button>
+            </div>
+          </div>
+
+          <!-- MASTER-DETAIL SPLIT WORKSPACE -->
+          <div class="hub-split-layout">
+            <!-- Left Master List Column -->
+            <div class="hub-master-col">
+              <div class="hub-search-wrap">
+                <div class="subview-search-box" style="width: 100%;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                  <input type="text" id="vehicleSearchInput" class="form-input"
+                    placeholder="Search vehicle models (Activa, Unicorn, Dio, Shine...)...">
+                </div>
+                <div class="hub-filter-chips" id="vehFilterChips">
+                  <button type="button" class="hub-chip active" data-filter="all">All (<span
+                      id="vehStatTotal">0</span>)</button>
+                  <button type="button" class="hub-chip" data-filter="workshop">In Workshop (<span
+                      id="vehStatWorkshop">0</span>)</button>
+                  <button type="button" class="hub-chip" data-filter="ready">Ready / Idle</button>
+                </div>
+              </div>
+
+              <div class="hub-master-list" id="vehiclesMasterList">
+                <!-- Rendered by JS -->
+              </div>
+            </div>
+
+            <!-- Right Detail Dossier Column -->
+            <div class="hub-detail-col" id="vehicleDetailDossier">
+              <div class="hub-empty-state">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M5 17a2 2 0 1 0 4 0 2 2 0 1 0-4 0m10 0a2 2 0 1 0 4 0 2 2 0 1 0-4 0"></path>
+                  <path d="M5 17H3v-4l2-5h9l4 5h1a2 2 0 0 1 2 2v2h-2m-4 0H9"></path>
+                </svg>
+                <p>Select a vehicle to view owner profile, workshop status, and service ticket history.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION: DEDICATED PARTS & INVENTORY COMMAND CENTER -->
+        <section id="partsView" class="main-subview" style="display: none;">
+          <div class="subview-header">
+            <div class="subview-title-wrap">
+              <div class="hub-pill-tag tag-parts">Parts & Inventory</div>
+            </div>
+            <div class="subview-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="btnPartsHeaderAction">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span id="partsHeaderActionText">+ Add Part to Stock</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- SUB-TAB SWITCHER -->
+          <div class="hub-subnav-bar">
+            <button type="button" class="hub-subnav-tab active" id="subtabPartsStock">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path
+                  d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+                </path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+              </svg>
+              <span>Stock Inventory</span>
+            </button>
+            <button type="button" class="hub-subnav-tab" id="subtabPartsOrders">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+                <path d="M9 14l2 2 4-4"></path>
+              </svg>
+              <span>Parts Orders & Procurement</span>
+              <span class="hub-badge-counter" id="badgePendingOrdersCount" style="margin-left: 6px;">0</span>
+            </button>
+          </div>
+
+          <!-- SUBTAB PANE 1: STOCK INVENTORY (CARDS & DETAILS TABLE) -->
+          <div id="panePartsStockTab" class="hub-subpane">
+            <div class="parts-stock-workspace">
+              <!-- Top Toolbar with Search, Stock Filter Chips & View Mode Switcher -->
+              <div class="parts-toolbar">
+                <div class="parts-toolbar-left">
+                  <div class="subview-search-box" style="width: 280px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="partsSearchInput" class="form-input"
+                      placeholder="Search part name, SKU / code...">
+                  </div>
+                  <div class="hub-filter-chips" id="partsFilterChips">
+                    <button type="button" class="hub-chip active" data-filter="all">All (<span
+                        id="partsStatTotal">0</span>)</button>
+                    <button type="button" class="hub-chip" data-filter="in_stock">In Stock</button>
+                    <button type="button" class="hub-chip" data-filter="low_stock">Low Stock (<span
+                        id="partsStatLow">0</span>)</button>
+                    <button type="button" class="hub-chip" data-filter="out_of_stock">Out of Stock</button>
+                  </div>
+                </div>
+
+                <div class="parts-toolbar-right">
+                  <!-- Segmented View Toggle: Cards vs Details Table -->
+                  <div class="parts-view-toggle">
+                    <button type="button" class="parts-view-btn active" id="btnPartsViewCards" data-mode="cards"
+                      title="Group parts in cards">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <rect x="3" y="3" width="7" height="7"></rect>
+                        <rect x="14" y="3" width="7" height="7"></rect>
+                        <rect x="14" y="14" width="7" height="7"></rect>
+                        <rect x="3" y="14" width="7" height="7"></rect>
+                      </svg>
+                      <span>Cards View</span>
+                    </button>
+                    <button type="button" class="parts-view-btn" id="btnPartsViewTable" data-mode="table"
+                      title="Show catalog details in a compact table">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <line x1="3" y1="6" x2="21" y2="6"></line>
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                        <line x1="3" y1="18" x2="21" y2="18"></line>
+                      </svg>
+                      <span>Details Table</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- VIEW 1: Grouped Cards Grid -->
+              <div id="partsCardsContainer" class="parts-cards-grid">
+                <!-- Rendered dynamically by JS -->
+              </div>
+
+              <!-- VIEW 2: High-Density Compact Details Table -->
+              <div id="partsTableContainer" class="parts-table-view-wrap" style="display: none;">
+                <table class="compact-data-table" id="partsDetailsTable">
+                  <thead>
+                    <tr>
+                      <th style="width: 140px;">SKU / Code</th>
+                      <th>Part Name / Description</th>
+                      <th style="width: 130px;">Stock Level</th>
+                      <th style="width: 110px;">Unit Cost</th>
+                      <th style="width: 100px; text-align: center;">Orders</th>
+                      <th style="width: 120px;">Asset Value</th>
+                      <th style="width: 90px; text-align: center;">Quick Stock</th>
+                      <th style="width: 140px; text-align: right;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="partsDetailsTableBody">
+                    <!-- Rendered dynamically by JS -->
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Hidden Master List container for backwards-compatibility or selection sync -->
+              <div id="partsMasterList" style="display: none;"></div>
+              <div id="partDetailDossier" style="display: none;"></div>
+            </div>
+          </div>
+
+          <!-- SUBTAB PANE 2: ORDERS PIPELINE -->
+          <div id="panePartsOrdersTab" class="hub-subpane" style="display: none;">
+            <div class="parts-orders-container">
+              <!-- KPI Summary Ribbon -->
+              <div class="parts-kpi-ribbon">
+                <div class="parts-kpi-ribbon-item">
+                  <span class="kpi-label">Total Parts Ordered:</span>
+                  <span class="kpi-val" id="kpiTotalPartsOrdered">0</span>
+                </div>
+                <div class="parts-kpi-ribbon-sep"></div>
+                <div class="parts-kpi-ribbon-item">
+                  <span class="kpi-label" style="color: #b45309;">Pending Arrival:</span>
+                  <span class="kpi-val text-amber" id="kpiPendingPartsOrders">0</span>
+                </div>
+                <div class="parts-kpi-ribbon-sep"></div>
+                <div class="parts-kpi-ribbon-item">
+                  <span class="kpi-label" style="color: #047857;">Arrived & Installed:</span>
+                  <span class="kpi-val text-emerald" id="kpiArrivedPartsOrders">0</span>
+                </div>
+                <div class="parts-kpi-ribbon-sep"></div>
+                <div class="parts-kpi-ribbon-item">
+                  <span class="kpi-label">Total Procurement Spend:</span>
+                  <span class="kpi-val text-primary" id="kpiTotalProcurementCost">₹0</span>
+                </div>
+              </div>
+
+              <!-- Orders Filter & Search Toolbar -->
+              <div class="parts-orders-toolbar">
+                <div class="subview-search-box" style="flex: 1; max-width: 380px;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                  <input type="text" id="partsOrdersSearchInput" class="form-input"
+                    placeholder="Search part, ticket #, vehicle plate, customer...">
+                </div>
+                <div class="hub-filter-chips" id="partsOrdersFilterChips">
+                  <button type="button" class="hub-chip active" data-filter="all">All Orders</button>
+                  <button type="button" class="hub-chip" data-filter="ORDERED">Awaiting Arrival</button>
+                  <button type="button" class="hub-chip" data-filter="ARRIVED">Arrived</button>
+                </div>
+              </div>
+
+              <!-- Orders Table Container (Compact) -->
+              <div class="parts-orders-table-wrapper">
+                <table class="compact-data-table" id="partsOrdersTable">
+                  <thead>
+                    <tr>
+                      <th>Part Item</th>
+                      <th>Ticket #</th>
+                      <th>Vehicle & Customer</th>
+                      <th style="text-align: center;">Qty</th>
+                      <th>Unit Cost</th>
+                      <th>Total</th>
+                      <th>Status</th>
+                      <th>Order / Arrival Date</th>
+                      <th style="text-align: right;">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="partsOrdersTableBody">
+                    <!-- Rendered by JS -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION 3: DEDICATED INSURANCE & SURVEYORS COMMAND CENTER -->
+        <section id="insuranceView" class="main-subview" style="display: none;">
+          <div class="subview-header">
+            <div class="subview-title-wrap">
+              <div class="hub-pill-tag tag-insurance">Insurance Desk</div>
+            </div>
+            <div class="subview-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="btnInsuranceHeaderAction">
+                <svg id="headerActionIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                </svg>
+                <span id="headerActionText">+ Add Insurance</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- SUB-TAB SWITCHER -->
+          <div class="hub-subnav-bar">
+            <button type="button" class="hub-subnav-tab active" id="subtabInsurers">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              <span>Insurance Companies</span>
+            </button>
+            <button type="button" class="hub-subnav-tab" id="subtabSurveyors">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+              <span>Surveyors</span>
+            </button>
+          </div>
+
+          <!-- SUBTAB PANE 1: INSURERS MASTER-DETAIL -->
+          <div id="paneInsurersTab" class="hub-subpane">
+            <!-- MASTER-DETAIL SPLIT WORKSPACE -->
+            <div class="hub-split-layout">
+              <!-- Left Master List Column -->
+              <div class="hub-master-col">
+                <div class="hub-search-wrap">
+                  <div class="subview-search-box" style="width: 100%;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="insuranceSearchInput" class="form-input"
+                      placeholder="Search insurer name...">
+                  </div>
+                </div>
+
+                <div class="hub-master-list" id="insurersMasterList">
+                  <!-- Rendered by JS -->
+                </div>
+              </div>
+
+              <!-- Right Detail Dossier Column -->
+              <div class="hub-detail-col" id="insurerDetailDossier">
+                <!-- Rendered by JS upon selection -->
+                <div class="hub-empty-state">
+                  <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg>
+                  <p>Select an insurance partner to view their authorized surveyors and live insurance claim tickets.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SUBTAB PANE 2: SURVEYORS DEDICATED MASTER-DETAIL WORKSPACE -->
+          <div id="paneSurveyorsTab" class="hub-subpane" style="display: none;">
+            <!-- MASTER-DETAIL SPLIT WORKSPACE FOR SURVEYORS -->
+            <div class="hub-split-layout">
+              <!-- Left Master List Column: Surveyors Roster -->
+              <div class="hub-master-col">
+                <div class="hub-search-wrap">
+                  <div class="subview-search-box" style="width: 100%;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="surveyorSearchInput" class="form-input"
+                      placeholder="Search surveyor name, phone, or insurer...">
+                  </div>
+                  <div class="hub-filter-chips" id="survFilterChips">
+                    <button type="button" class="hub-chip active" data-filter="all">All</button>
+                    <button type="button" class="hub-chip" data-filter="active">Active Claims</button>
+                    <button type="button" class="hub-chip" data-filter="fast">Fast SLA</button>
+                  </div>
+                </div>
+
+                <div class="hub-master-list" id="surveyorsMasterList">
+                  <!-- Rendered by JS -->
+                </div>
+              </div>
+
+              <!-- Right Detail Dossier Column: Dedicated Surveyor Profile & SLA History -->
+              <div class="hub-detail-col" id="surveyorDetailDossier">
+                <div class="hub-empty-state">
+                  <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                  </svg>
+                  <p>Select a surveyor to view their detailed profile, SLA turnaround performance, and complete claims
+                    history.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION 4: SETTINGS > HOLIDAYS VIEW -->
+        <section id="holidaysView" class="main-subview" style="display: none;">
+          <div class="subview-header">
+            <div class="subview-title-wrap">
+              <div class="breadcrumb-trail">
+                <span>Settings</span> <span class="bc-sep">›</span> <span class="bc-current">Workshop Holidays</span>
+              </div>
+              <h2>Workshop Holidays & Working Days Settings</h2>
+              <p class="subview-subtitle">Honda SLA engine calculates turnaround on Monday–Saturday schedule. Days
+                listed below are exempted non-working holidays.</p>
+            </div>
+          </div>
+
+          <div class="holidays-layout-grid">
+            <!-- Left Column: Add Holiday Form -->
+            <div class="holiday-form-card">
+              <div class="card-header-simple">
+                <h3>+ Add Workshop Holiday</h3>
+                <p>Register a festival, national holiday, or workshop maintenance day.</p>
+              </div>
+              <form id="formAddHoliday" autocomplete="off">
+                <div class="form-group">
+                  <label for="holidayDate">Holiday Date <span class="req">*</span></label>
+                  <input type="date" id="holidayDate" class="form-input" required>
+                </div>
+                <div class="form-group">
+                  <label for="holidayName">Holiday / Occasion Name <span class="req">*</span></label>
+                  <input type="text" id="holidayName" class="form-input"
+                    placeholder="e.g. Diwali / Republic Day / Annual Audit" required>
+                </div>
+                <div class="info-callout" style="margin-top: 14px; margin-bottom: 16px;">
+                  <span class="info-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="12" y1="16" x2="12" y2="12"></line>
+                      <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    </svg></span>
+                  <span>Sundays are automatically treated as non-working days by default. Only enter Monday–Saturday
+                    dates here.</span>
+                </div>
+                <button type="submit" class="btn btn-primary" id="btnSaveHoliday" style="width: 100%;">
+                  Save Holiday & Recalculate SLA
+                </button>
+              </form>
+            </div>
+
+            <!-- Right Column: Holidays List -->
+            <div class="holiday-list-card">
+              <div class="card-header-simple flex-between">
+                <div>
+                  <h3>Configured Holidays (<span id="holidaysCount">0</span>)</h3>
+                  <p>Read directly from <code>config/holidays.json</code> into SLA Engine</p>
+                </div>
+                <span class="badge-status-normal">Mon–Sat Schedule Active</span>
+              </div>
+              <div class="table-container">
+                <table class="data-table" id="holidaysTable">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Day of Week</th>
+                      <th>Holiday / Occasion</th>
+                      <th>SLA Status</th>
+                      <th style="width: 80px; text-align: right;">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="holidaysTableBody">
+                    <!-- Rendered by JS -->
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- HOLIDAYS PAGINATION FOOTER -->
+              <div class="table-pagination-footer" id="holidaysPaginationFooter">
+                <div class="tp-pagination-info" id="holidaysPaginationInfo">Showing 0–0 of 0 holidays</div>
+                <div class="tp-pagination-controls">
+                  <div class="tv-tool-item" style="margin-right: 12px;">
+                    <label for="holidaysPageSize" class="tv-label">Show:</label>
+                    <select id="holidaysPageSize" class="form-select select-compact"
+                      style="height: 28px; line-height: 26px; padding-top: 0; padding-bottom: 0;">
+                      <option value="10" selected>10</option>
+                      <option value="25">25</option>
+                      <option value="ALL">All</option>
+                    </select>
+                  </div>
+                  <button type="button" class="btn-page-nav" id="btnHolPrevPage" title="Previous Page">‹ Prev</button>
+                  <div class="tp-page-numbers" id="holidaysPageNumbers"></div>
+                  <button type="button" class="btn-page-nav" id="btnHolNextPage" title="Next Page">Next ›</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION 5: SETTINGS > PIPELINE SLA TIMING VIEW -->
+        <section id="slaSettingsView" class="main-subview" style="display: none;">
+          <div class="subview-header">
+            <div class="subview-title-wrap">
+              <div class="breadcrumb-trail">
+                <span>Settings</span> <span class="bc-sep">›</span> <span class="bc-current">Pipeline SLA Timing</span>
+              </div>
+              <h2>Pipeline Stage SLA Timing & Turnaround Limits</h2>
+              <p class="subview-subtitle">Configure the standard Working Days (WD) turnaround allowance for each
+                workshop stage. Updates immediately recalibrate real-time SLA evaluations, aging ratios, and breach
+                alerts across all branches.</p>
+            </div>
+            <div class="subview-actions">
+              <button type="button" class="btn btn-outline" id="btnResetDefaultSla"
+                title="Reset all stages to factory default Honda SLA limits">
+                ↺ Reset to Defaults
+              </button>
+              <button type="button" class="btn btn-primary" id="btnSaveAllSla"
+                title="Save and apply SLA changes across all stages">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  style="vertical-align:middle;margin-right:4px;">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                  <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                  <polyline points="7 3 7 8 15 8"></polyline>
+                </svg>
+                Save All SLA Limits
+              </button>
+            </div>
+          </div>
+
+          <div class="sla-settings-container">
+            <div class="sla-info-banner">
+              <div class="sla-banner-left">
+                <span class="sla-banner-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                  </svg>
+                </span>
+                <div>
+                  <strong>Monday–Saturday Working Days Calculation</strong>
+                  <p>The SLA engine counts whole working days from entered date to completion. Sundays and configured
+                    workshop holidays are automatically exempted.</p>
+                </div>
+              </div>
+              <div class="sla-banner-pill">
+                <span>12 Operational Stages</span>
+              </div>
+            </div>
+
+            <div class="sla-table-card">
+              <div class="table-container">
+                <table class="data-table sla-config-table" id="slaConfigTable">
+                  <thead>
+                    <tr>
+                      <th style="width: 55px;">Stage</th>
+                      <th>Stage Name & Milestone</th>
+                      <th style="width: 130px;">Kanban Column</th>
+                      <th style="width: 100px;">Type</th>
+                      <th style="width: 170px;">SLA Limit (Working Days)</th>
+                      <th style="width: 140px;">Default Reference</th>
+                      <th>Operational Rule / Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody id="slaConfigTableBody">
+                    <!-- Rendered by JS -->
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- SLA CONFIG PAGINATION FOOTER -->
+              <div class="table-pagination-footer" id="slaConfigPaginationFooter">
+                <div class="tp-pagination-info" id="slaConfigPaginationInfo">Showing 1–13 of 13 stages</div>
+                <div class="tp-pagination-controls">
+                  <div class="tv-tool-item" style="margin-right: 12px;">
+                    <label for="slaConfigPageSize" class="tv-label">Show:</label>
+                    <select id="slaConfigPageSize" class="form-select select-compact"
+                      style="height: 28px; line-height: 26px; padding-top: 0; padding-bottom: 0;">
+                      <option value="ALL" selected>All Stages</option>
+                      <option value="5">5 stages</option>
+                      <option value="10">10 stages</option>
+                    </select>
+                  </div>
+                  <button type="button" class="btn-page-nav" id="btnSlaPrevPage" title="Previous Page">‹ Prev</button>
+                  <div class="tp-page-numbers" id="slaConfigPageNumbers"></div>
+                  <button type="button" class="btn-page-nav" id="btnSlaNextPage" title="Next Page">Next ›</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div> <!-- /app-main-area -->
+  </div> <!-- /app-layout -->
+
+  <!-- ==================================================== -->
+  <!-- MODAL 1: NEW VEHICLE ARRIVAL / TICKET INTAKE (Keyboard First) -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalNewTicket" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3>Vehicle Arrival & Intake</h3>
+          <p class="modal-sub">Stage 1: Vehicle Arrival. Autocomplete will suggest existing customer/vehicle records.
+          </p>
+        </div>
+        <button class="modal-close" data-close="modalNewTicket">&times;</button>
+      </div>
+      <form id="formNewTicket" autocomplete="off">
+        <div class="modal-body">
+          <div class="modal-form-grid">
+            <!-- Branch & Arrival Time -->
+            <div class="form-group">
+              <label for="newOutletId">Service Branch <span class="req">*</span></label>
+              <select id="newOutletId" class="form-select" required tabindex="1">
+                <!-- Branches populated by JS -->
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="newArrivalDate">Arrival Date / Time <span class="req">*</span></label>
+              <input type="datetime-local" id="newArrivalDate" class="form-input" required tabindex="2">
+            </div>
+
+            <!-- Section 1: Customer Profile -->
+            <div class="autocomplete-section-title">
+              <span>Customer Profile</span>
+              <span class="section-hint">Type to search existing customer db</span>
+            </div>
+            <div class="form-group rel-pos">
+              <label for="newCustomerName">Customer Name <span class="req">*</span></label>
+              <input type="text" id="newCustomerName" class="form-input" placeholder="e.g. Rahul Sharma" required
+                tabindex="3">
+              <div class="suggestions-box" id="suggestCustomerName"></div>
+            </div>
+            <div class="form-group rel-pos">
+              <label for="newCustomerPhone">Customer Phone <span class="req">*</span></label>
+              <input type="tel" id="newCustomerPhone" class="form-input" placeholder="e.g. +91 98765 43210" required
+                tabindex="4">
+              <div class="suggestions-box" id="suggestCustomerPhone"></div>
+            </div>
+
+            <!-- Section 2: Vehicle Specification -->
+            <div class="autocomplete-section-title">
+              <span>Vehicle Specification</span>
+              <span class="section-hint">Auto-links to selected customer</span>
+            </div>
+            <div class="form-group rel-pos">
+              <label for="newVehicleName">Vehicle Model <span class="req">*</span></label>
+              <input type="text" id="newVehicleName" class="form-input" placeholder="e.g. SP125 OBD2B / Activa 125"
+                required tabindex="5">
+              <div class="suggestions-box" id="suggestVehicleName"></div>
+            </div>
+            <div class="form-group rel-pos">
+              <label for="newVehicleColor">Vehicle Color / Paint</label>
+              <input type="text" id="newVehicleColor" class="form-input"
+                placeholder="e.g. Mat Axis Gray / Pearl Siren Blue" tabindex="6">
+              <div class="suggestions-box" id="suggestVehicleColor"></div>
+            </div>
+            <div class="form-group rel-pos">
+              <label for="newVehicleNo">Vehicle Reg No (Optional)</label>
+              <input type="text" id="newVehicleNo" class="form-input text-uppercase" placeholder="e.g. MH-02-AB-1234"
+                tabindex="7">
+              <div class="suggestions-box" id="suggestVehicleNo"></div>
+            </div>
+            <div class="form-group form-group-full rel-pos">
+              <label for="newChassisNumber">Chassis Number / VIN (Optional)</label>
+              <input type="text" id="newChassisNumber" class="form-input text-uppercase"
+                placeholder="Chassis No / VIN (e.g. MAKGM6681KH029182)" tabindex="8">
+              <div class="suggestions-box" id="suggestChassisNumber"></div>
+            </div>
+
+            <!-- Full Width: Info Callout -->
+            <div class="form-group-full">
+              <div class="info-callout">
+                <span class="info-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                  </svg></span>
+                <span>If this customer or vehicle is new, it will automatically save to the database. Press
+                  <kbd>Tab</kbd> to cycle, <kbd>Ctrl+Enter</kbd> to submit.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalNewTicket" tabindex="9">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSubmitNewTicket" tabindex="8">Create Ticket (Stage
+            1)</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 2: STAGE PROGRESSION / ADVANCE MODAL -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalAdvanceStage" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3 id="advanceModalTitle">Advance Stage</h3>
+          <p class="modal-sub" id="advanceModalSub">Transitioning ticket to the next operational phase.</p>
+        </div>
+        <button class="modal-close" data-close="modalAdvanceStage">&times;</button>
+      </div>
+      <form id="formAdvanceStage" autocomplete="off">
+        <input type="hidden" id="advanceTicketId">
+        <input type="hidden" id="advanceTargetStageId">
+
+        <div class="modal-body" id="advanceDynamicFields">
+          <!-- Populated dynamically based on target stage -->
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalAdvanceStage">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnConfirmAdvance">Confirm</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 3: PIPELINE BYPASS & EARLY VEHICLE DELIVERY -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalBypassPipeline" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header warning-header">
+        <div>
+          <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="vertical-align:-2px;margin-right:6px;">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>Bypass Pipeline & Close Ticket</h3>
+          <p class="modal-sub">Direct Customer Payment / Early Vehicle Delivery</p>
+        </div>
+        <button class="modal-close" data-close="modalBypassPipeline">&times;</button>
+      </div>
+      <form id="formBypassPipeline">
+        <input type="hidden" id="bypassTicketId">
+        <div class="modal-body">
+          <div class="alert-box warning-box">
+            <strong>Pipeline Bypass Notice:</strong>
+            <p>This action will mark the vehicle as delivered and immediately close the ticket, bypassing pending
+              insurance, surveyor resurvey, or invoicing procedures.</p>
+          </div>
+
+          <div class="form-group">
+            <label for="bypassReason">Reason for Early Closure <span class="req">*</span></label>
+            <input type="text" id="bypassReason" class="form-input"
+              value="Customer paid directly before insurance clearance and picked up vehicle." required>
+          </div>
+
+          <div class="form-group">
+            <label for="bypassNotes">Additional Audit Notes</label>
+            <textarea id="bypassNotes" class="form-textarea" rows="3"
+              placeholder="Enter any specific payment, invoice, or handover notes..."></textarea>
+          </div>
+
+          <div class="form-group"
+            style="margin-top: 12px; background: #fff1f2; border: 1px solid #fecdd3; padding: 10px 12px; border-radius: 6px;">
+            <label for="bypassConfirmInput" style="color: #9f1239; font-weight: 700; margin-bottom: 4px;">Type "CONFIRM"
+              to proceed <span class="req">*</span></label>
+            <input type="text" id="bypassConfirmInput" class="form-input" placeholder='Type "CONFIRM"'
+              autocomplete="off" required>
+            <small style="font-size: 11px; color: #be123c;">Must type CONFIRM to unlock bypass button.</small>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalBypassPipeline">Cancel</button>
+          <button type="submit" class="btn btn-danger" id="btnConfirmBypass" disabled>Confirm Early Delivery &
+            Close</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- UNIVERSAL CONFIRMATION DIALOG MODAL -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalConfirmDialog" style="display: none; z-index: 99999;">
+    <div class="modal modal-sm confirm-modal-card">
+      <div class="confirm-modal-icon-wrap" id="confirmModalIconWrap">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+          <line x1="12" y1="9" x2="12" y2="13"></line>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+      </div>
+      <h3 id="confirmDialogTitle" class="confirm-modal-title">Confirm Action</h3>
+      <p id="confirmDialogMessage" class="confirm-modal-desc">Are you sure you want to proceed? This action cannot be undone.</p>
+      <div class="confirm-modal-actions">
+        <button type="button" class="btn btn-outline btn-compact" id="btnCancelConfirmDialog">Cancel</button>
+        <button type="button" class="btn btn-danger btn-compact" id="btnAcceptConfirmDialog">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 4: ALERTS CENTER (MENTIONS & EOD MANAGER REPORT) -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalEodReport" style="display: none;">
+    <div class="modal modal-lg">
+      <div class="modal-header" style="flex-direction: column; align-items: stretch; gap: 10px; padding-bottom: 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+          <div>
+            <h3>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:6px;">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+              </svg>
+              Alerts & Notifications
+            </h3>
+            <p class="modal-sub">Mentions, team note replies, and real-time SLA breach overviews.</p>
+          </div>
+          <button class="modal-close" data-close="modalEodReport">&times;</button>
+        </div>
+
+        <!-- DUAL-SECTION TAB SWITCHER -->
+        <div class="modal-tab-nav" id="alertModalTabs">
+          <button type="button" class="modal-tab-btn active" data-alert-tab="mentions" id="tabAlertsMentions">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px;">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"></path>
+            </svg>
+            <span>Mentions & Activity</span>
+            <span class="tab-badge" id="countTabMentions">0</span>
+          </button>
+          <button type="button" class="modal-tab-btn" data-alert-tab="eod" id="tabAlertsEod">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px;">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+            </svg>
+            <span>EOD & SLA Alerts</span>
+            <span class="tab-badge warning-badge" id="countTabEod">0</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="modal-body" style="padding-top: 14px;">
+        <!-- TAB 1: MENTIONS & ACTIVITY -->
+        <div id="paneAlertsMentions" class="alert-tab-pane">
+          <div class="pane-toolbar">
+            <div class="pane-filters">
+              <button type="button" class="btn-xs btn-outline active" id="btnFilterMentionsAll">All</button>
+              <button type="button" class="btn-xs btn-outline" id="btnFilterMentionsUnread">Unread Only</button>
+            </div>
+            <button type="button" class="btn-xs btn-outline" id="btnMarkAllMentionsRead">Mark all as read</button>
+          </div>
+          <div class="alerts-stream-container" id="alertsMentionsList">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+
+        <!-- TAB 2: EOD & SLA ALERTS (TODAY VS ALL-TIME) -->
+        <div id="paneAlertsEod" class="alert-tab-pane" style="display: none;">
+          <!-- EOD SCOPE TOGGLE -->
+          <div class="eod-scope-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+            <div class="eod-scope-pills" id="eodScopePills">
+              <button type="button" class="btn-xs modal-tab-btn active" id="btnEodScopeToday" data-eod-scope="today">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:4px;">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="16" y1="2" x2="16" y2="6"></line>
+                  <line x1="8" y1="2" x2="8" y2="6"></line>
+                  <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+                <span>Today's EOD Report</span>
+              </button>
+              <button type="button" class="btn-xs modal-tab-btn" id="btnEodScopeAllTime" data-eod-scope="all">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:4px;">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="2" y1="12" x2="22" y2="12"></line>
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                </svg>
+                <span>All-Time SLA Breaches</span>
+              </button>
+            </div>
+            <div id="eodScopeSubtitle" style="font-size: 11px; color: var(--text-subtle); font-weight: 500;">
+              Showing active workshop breaches occurred / active today
+            </div>
+          </div>
+
+          <div class="eod-summary-cards">
+            <div class="eod-card red-card">
+              <span class="eod-card-title" id="eodCardTitleBreached">Breached (Today)</span>
+              <span class="eod-card-num" id="eodTotalBreached">0</span>
+            </div>
+            <div class="eod-card amber-card">
+              <span class="eod-card-title" id="eodCardTitleDueSoon">Due Soon (≤ 1 WD)</span>
+              <span class="eod-card-num" id="eodTotalDueSoon">0</span>
+            </div>
+            <div class="eod-card gray-card">
+              <span class="eod-card-title" id="eodCardTitleActive">Active Tickets</span>
+              <span class="eod-card-num" id="eodTotalActive">0</span>
+            </div>
+          </div>
+
+          <div class="breach-table-wrap">
+            <h4 id="eodBreachListHeader">Today's Breached Tickets</h4>
+            <div id="eodBreachList">
+              <!-- Rendered by JS -->
+            </div>
+          </div>
+
+          <!-- Google Apps Script EOD Action -->
+          <div class="gas-eod-section">
+            <div class="gas-info">
+              <strong>Manager Email Alert Push (EOD Summary)</strong>
+              <p>Executives can click below at end of day to preview the structured SLA breach digest payload.</p>
+            </div>
+            <button class="btn btn-danger" id="btnTriggerEodPush">
+              Send EOD Breach Report to Managers
+            </button>
+          </div>
+
+          <div id="eodPayloadPreview" style="display: none;" class="payload-preview-box">
+            <div class="preview-header">
+              <span>Prepared Google Apps Script Webhook Payload:</span>
+              <button class="btn-xs" id="btnHidePreview">Hide</button>
+            </div>
+            <pre><code id="payloadJson"></code></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" data-close="modalEodReport">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- DRAWER: TICKET DETAIL & RE-EDITABLE FIELDS AUDIT -->
+  <!-- ==================================================== -->
+  <div class="drawer-overlay" id="drawerDetail" style="display: none;">
+    <div class="drawer">
+      <div class="drawer-header">
+        <div>
+          <div class="drawer-title-row">
+            <h3 id="drawerTicketNumber">TCK-2026-000</h3>
+            <span class="badge" id="drawerSlaBadge">Within SLA</span>
+          </div>
+          <p class="drawer-sub" id="drawerOutletName">Honda Service Branch</p>
+        </div>
+        <button class="drawer-close" id="btnCloseDrawer">&times;</button>
+      </div>
+
+      <div class="drawer-tabs">
+        <button type="button" class="drawer-tab-btn active" data-drawer-tab="timeline" id="tabDrawerTimeline">Stage Timeline</button>
+        <button type="button" class="drawer-tab-btn" data-drawer-tab="notes" id="tabDrawerNotes">
+          Notes & Comments (<span id="drawerNotesCount">0</span>)
+        </button>
+      </div>
+
+      <div class="drawer-content">
+        <div class="timeline-container" id="drawerTimeline">
+          <!-- Rendered by JS -->
+        </div>
+        <div class="drawer-notes-container" id="drawerNotesPane" style="display: none;">
+          <div class="drawer-comment-composer">
+            <textarea id="inputDrawerComment" class="form-textarea" rows="2" placeholder="Write a note or mention (@staff)..."></textarea>
+            <div style="display: flex; justify-content: flex-end; margin-top: 6px;">
+              <button type="button" class="btn btn-primary btn-xs" id="btnSubmitDrawerComment">Post Note</button>
+            </div>
+          </div>
+          <div class="drawer-comments-stream" id="drawerCommentsStream"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 5: ROLLBACK STAGE (MOVE BACKWARDS) -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalRollbackStage" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header danger-header">
+        <div>
+          <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="vertical-align:-2px;margin-right:6px;">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>Move Backward & Erase Entries</h3>
+          <p class="modal-sub">Irreversible Stage Rollback</p>
+        </div>
+        <button class="modal-close" data-close="modalRollbackStage">&times;</button>
+      </div>
+      <form id="formRollbackStage">
+        <input type="hidden" id="rollbackTicketId">
+        <input type="hidden" id="rollbackTargetStageId">
+        <div class="modal-body">
+          <div class="alert-box danger-box"
+            style="background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; padding: 12px; border-radius: 6px; margin-bottom: 14px;">
+            <strong style="display:block; margin-bottom:4px; font-size:13px;">Critical Warning:</strong>
+            <p id="rollbackWarningText" style="margin:0; font-size:12px; line-height:1.4;">
+              Moving backward will permanently erase all stage logs, estimates, survey entries, and parts data recorded
+              after this stage.
+            </p>
+          </div>
+
+          <div class="form-group"
+            style="background: #fff1f2; border: 1px solid #fecdd3; padding: 10px 12px; border-radius: 6px;">
+            <label for="rollbackConfirmInput" style="color: #9f1239; font-weight: 700; margin-bottom: 4px;">Type
+              "CONFIRM" to proceed <span class="req">*</span></label>
+            <input type="text" id="rollbackConfirmInput" class="form-input" placeholder='Type "CONFIRM"'
+              autocomplete="off" required>
+            <small style="font-size: 11px; color: #be123c;">All subsequent entries up to current stage will be wiped
+              clean.</small>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalRollbackStage">Cancel</button>
+          <button type="submit" class="btn btn-danger" id="btnConfirmRollback" disabled>Erase & Move Back</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 6: SKIP STAGES CONFIRMATION -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalSkipStages" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header warning-header">
+        <div>
+          <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="vertical-align:-2px;margin-right:6px;">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>Skip Stages & Fast-Forward</h3>
+          <p class="modal-sub">Multi-Stage Pipeline Jump</p>
+        </div>
+        <button class="modal-close" data-close="modalSkipStages">&times;</button>
+      </div>
+      <form id="formSkipStages">
+        <input type="hidden" id="skipTicketId">
+        <input type="hidden" id="skipTargetStageId">
+        <div class="modal-body">
+          <div class="alert-box warning-box" style="margin-bottom: 14px;">
+            <strong style="display:block; margin-bottom:4px;">Stage Skip Notice:</strong>
+            <p id="skipWarningText" style="margin:0; font-size:12px; line-height:1.4;">
+              You are skipping stages. The skipped intermediate stages will be recorded in the audit trail as SKIPPED.
+            </p>
+          </div>
+
+          <div class="form-group">
+            <label for="skipReasonInput">Reason for Skipping Stages</label>
+            <input type="text" id="skipReasonInput" class="form-input"
+              placeholder="e.g. Fast-tracked repair, direct parts available" value="Fast-tracked pipeline transition">
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalSkipStages">Cancel</button>
+          <button type="submit" class="btn btn-warning" id="btnConfirmSkip">Confirm & Skip Stages</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 7: SAFE EDIT TICKET DETAILS & CRM MASTER DATA -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalEditTicketPage" style="display: none;">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title-with-badge" style="display: flex; align-items: center; gap: 8px;">
+            <h3 id="meditModalTitle">Edit Ticket Details</h3>
+            <span class="tp-branch-badge" id="meditBranchBadge">Workshop</span>
+          </div>
+          <p class="modal-sub">Modify service estimates, surveyor details, or master customer/vehicle records with CRM
+            safeguards.</p>
+        </div>
+        <button class="modal-close" data-close="modalEditTicketPage">&times;</button>
+      </div>
+      <form id="formEditTicketPage" autocomplete="off">
+        <input type="hidden" id="meditTicketId">
+        <div class="modal-body">
+          <!-- SECTION 1: Operational Service Scope & Claims (Safe to edit per job) -->
+          <div class="modal-section-group">
+            <div class="modal-section-head">
+              <span class="modal-section-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"></path>
+                  <line x1="12" y1="6" x2="12" y2="8"></line>
+                  <line x1="12" y1="16" x2="12" y2="18"></line>
+                </svg>
+                Operational Service & Insurance Claim (Job Specific)
+              </span>
+              <span class="badge badge-safe">Safe to Edit</span>
+            </div>
+
+            <!-- Row-by-Row Parts Table Builder -->
+            <div class="parts-builder-section" style="margin-bottom: 14px;">
+              <div class="parts-builder-header">
+                <label
+                  style="font-weight: 700; font-size: 11px; text-transform: uppercase; color: #475569; letter-spacing: 0.3px;">
+                  Damaged Parts (Row by Row)
+                </label>
+                <span style="font-size: 11px; color: #94a3b8;">Type to search parts catalog or add custom items</span>
+              </div>
+              <div class="table-container"
+                style="margin-top: 6px; margin-bottom: 8px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); overflow: visible;">
+                <table class="parts-builder-table" id="meditPartsTable">
+                  <thead>
+                    <tr>
+                      <th style="width: 44%;">Part Item / Description</th>
+                      <th style="width: 14%; text-align: center;">Qty</th>
+                      <th style="width: 20%; text-align: right;">Unit Price (₹)</th>
+                      <th style="width: 22%; text-align: right;">Amount (₹)</th>
+                      <th style="width: 36px; text-align: center;"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="meditPartsTableBody">
+                    <!-- Dynamic Part Rows rendered by JS -->
+                  </tbody>
+                </table>
+              </div>
+              <div class="parts-builder-actions">
+                <button type="button" class="btn btn-outline btn-xs" id="meditBtnAddPartRow">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                  </svg>
+                  <span>Add Part Item</span>
+                </button>
+                <div class="parts-total-summary">
+                  <span class="parts-total-label">Parts Subtotal:</span>
+                  <span class="parts-total-val" id="meditPartsTotalVal">₹0</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="modal-form-grid" style="margin-bottom: 14px;">
+              <div class="form-group span-2">
+                <label for="meditJobNotes">Additional Job Scope & Labor Remarks</label>
+                <textarea id="meditJobNotes" class="form-textarea" rows="2"
+                  placeholder="List damaged panels, labor scope, painting, or job remarks..."></textarea>
+              </div>
+              <div class="form-group">
+                <label for="meditEstimatedCost">Total Estimated Repair Cost (₹) <span
+                    style="font-weight: normal; color: #94a3b8;">(Auto-sum or custom total)</span></label>
+                <input type="number" id="meditEstimatedCost" class="form-input" step="any" placeholder="0">
+              </div>
+              <div class="form-group">
+                <label for="meditInsuranceCompany">Insurance Partner / Company</label>
+                <input type="text" id="meditInsuranceCompany" class="form-input"
+                  placeholder="e.g. ICICI LOMBARD / NATIONAL / BAJAJ">
+              </div>
+              <div class="form-group">
+                <label for="meditSurveyorName">Surveyor Name</label>
+                <input type="text" id="meditSurveyorName" class="form-input" placeholder="e.g. Suresh Kumar">
+              </div>
+              <div class="form-group">
+                <label for="meditSurveyorPhone">Surveyor Phone</label>
+                <input type="tel" id="meditSurveyorPhone" class="form-input" placeholder="e.g. 9845012345">
+              </div>
+            </div>
+          </div>
+
+          <!-- SECTION 2: Master CRM Records (Protected & Guarded) -->
+          <div class="modal-section-group modal-crm-guarded">
+            <div class="modal-section-head">
+              <div class="modal-section-title-wrap">
+                <span class="modal-section-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                  </svg>
+                  Customer & Vehicle Master Directory (CRM)
+                </span>
+                <span class="badge badge-crm" id="meditCrmLockStatusBadge">Locked for Safety</span>
+              </div>
+              <button type="button" class="btn btn-xs btn-outline" id="meditBtnToggleLock">
+                <span id="meditLockBtnIcon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:3px;">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg></span>
+                <span id="meditLockBtnText">Unlock Master Fields</span>
+              </button>
+            </div>
+
+            <div class="crm-warning-alert" id="meditCrmWarningAlert">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+              <div>
+                <strong>CRM Master Record Protection:</strong>
+                <p>Editing phone number, customer name, or chassis modifies the customer's permanent record in the
+                  dealership CRM database. Fields are locked by default to prevent accidental edits.</p>
+              </div>
+            </div>
+
+            <div class="modal-form-grid" id="meditCrmFieldsContainer">
+              <div class="form-group">
+                <label for="meditCustomerName">Customer Name <span class="req">*</span></label>
+                <input type="text" id="meditCustomerName" class="form-input crm-field" required disabled>
+              </div>
+              <div class="form-group">
+                <label for="meditCustomerPhone">Primary Phone <span class="req">*</span></label>
+                <input type="tel" id="meditCustomerPhone" class="form-input crm-field" required disabled>
+              </div>
+              <div class="form-group">
+                <label for="meditVehicleName">Model Name <span class="req">*</span></label>
+                <input type="text" id="meditVehicleName" class="form-input crm-field" required disabled>
+              </div>
+              <div class="form-group">
+                <label for="meditVehicleColor">Color / Paint Code</label>
+                <input type="text" id="meditVehicleColor" class="form-input crm-field" placeholder="e.g. Mat Axis Gray"
+                  disabled>
+              </div>
+              <div class="form-group">
+                <label for="meditVehicleNo">Registration Number</label>
+                <input type="text" id="meditVehicleNo" class="form-input text-uppercase crm-field"
+                  placeholder="e.g. KA-01-AB-1234" disabled>
+              </div>
+              <div class="form-group">
+                <label for="meditChassisNumber">Chassis / VIN (Optional)</label>
+                <input type="text" id="meditChassisNumber" class="form-input text-uppercase crm-field" disabled>
+              </div>
+            </div>
+
+            <div class="crm-sync-opt" id="meditCrmSyncWrap" style="margin-top: 10px;">
+              <label class="checkbox-label"
+                style="font-size: 12px; color: var(--text-main); font-weight: 500; display: flex; align-items: center; gap: 7px; cursor: pointer;">
+                <input type="checkbox" id="meditSyncCrmCheckbox" checked>
+                <span>Synchronize updates to Master Customer & Vehicle CRM Directory</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalEditTicketPage">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="meditBtnSubmit">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 8: PARTS STATUS & DELAY NOTE -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalPartsNote" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3 id="partsNoteModalTitle">Parts / Delay Note</h3>
+          <p class="modal-sub" id="partsNoteModalSub">Record paint shop status, vendor transit delay, or hold notes.</p>
+        </div>
+        <button class="modal-close" data-close="modalPartsNote">&times;</button>
+      </div>
+      <form id="formPartsNote" autocomplete="off">
+        <input type="hidden" id="partsNoteTicketId">
+        <div class="modal-body">
+          <label
+            style="font-weight: 700; font-size: 11px; text-transform: uppercase; color: #475569; letter-spacing: 0.3px; margin-bottom: 6px; display: block;">
+            Quick Presets (Click to Auto-fill)
+          </label>
+          <div class="preset-chips-wrap">
+            <button type="button" class="preset-chip" data-prefix="Sent for Paint Job">Sent for Paint Job</button>
+            <button type="button" class="preset-chip" data-prefix="Vendor / Transit Delay">Vendor Delay</button>
+            <button type="button" class="preset-chip" data-prefix="Backordered / Out of Stock">Backordered</button>
+            <button type="button" class="preset-chip" data-prefix="Lathe / Fabrication Work">Lathe /
+              Fabrication</button>
+            <button type="button" class="preset-chip" data-prefix="Rework / Quality Hold">Quality Hold</button>
+          </div>
+
+          <div class="form-group" style="margin-top: 10px;">
+            <label for="partsNoteTextInput">Status Note / Reason (Optional)</label>
+            <textarea id="partsNoteTextInput" class="form-textarea" rows="3"
+              placeholder="e.g. Front bumper sent to external paint booth. Expected arrival Friday."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: space-between;">
+          <div>
+            <button type="button" class="btn btn-danger-outline btn-compact" id="btnPartsNoteClear"
+              style="display: none;">Clear Note</button>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn btn-outline btn-compact" data-close="modalPartsNote">Cancel</button>
+            <button type="submit" class="btn btn-primary btn-compact" id="btnPartsNoteSave">Save Note</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL: MANAGE PARTS & MARK ARRIVAL (STAGE 6 & GENERAL) -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalManageParts" style="display: none;">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <div>
+          <h3 id="managePartsModalTitle">Parts Order & Arrival</h3>
+          <p class="modal-sub" id="managePartsModalSub">Add parts, review order items, and mark arrived components with
+            logged timestamps.</p>
+        </div>
+        <button class="modal-close" data-close="modalManageParts">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 16px 20px;">
+        <input type="hidden" id="managePartsTicketId">
+
+        <!-- Summary Stats Banner -->
+        <div class="parts-mgmt-stats-bar">
+          <div class="stat-pill"><span class="stat-lbl">Total Parts:</span> <strong id="mgmtPartsTotalCount">0</strong>
+          </div>
+          <div class="stat-pill"><span class="stat-lbl">Arrived:</span> <strong id="mgmtPartsArrivedCount"
+              class="text-success" style="color:#16a34a;">0</strong></div>
+          <div class="stat-pill"><span class="stat-lbl">Pending Arrival:</span> <strong id="mgmtPartsPendingCount"
+              class="text-amber" style="color:#d97706;">0</strong></div>
+          <div class="stat-pill"><span class="stat-lbl">Total Cost:</span> <strong id="mgmtPartsTotalCost">₹0</strong>
+          </div>
+        </div>
+
+        <!-- Add Part Quick Form -->
+        <div class="parts-add-box">
+          <h4
+            style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #475569; margin-bottom: 8px; font-weight: 700;">
+            + Add New Part Item</h4>
+          <div class="parts-add-grid">
+            <div class="form-group rel-pos" style="margin-bottom:0; flex: 2;">
+              <input type="text" id="mgmtNewPartName" class="form-input form-input-sm"
+                placeholder="Part Name / Description *" required>
+              <div class="suggestions-box" id="mgmtSuggestParts"></div>
+            </div>
+            <div class="form-group" style="margin-bottom:0; flex: 1;">
+              <input type="text" id="mgmtNewPartCode" class="form-input form-input-sm" placeholder="Part Code / No.">
+            </div>
+            <div class="form-group" style="margin-bottom:0; width: 75px;">
+              <input type="number" id="mgmtNewPartQty" class="form-input form-input-sm" placeholder="Qty" value="1"
+                min="1">
+            </div>
+            <div class="form-group" style="margin-bottom:0; width: 110px;">
+              <input type="number" id="mgmtNewPartCost" class="form-input form-input-sm" placeholder="Unit ₹" step="any"
+                min="0">
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="btnMgmtAddPart"
+              style="height: 32px; padding: 0 14px; white-space: nowrap;">Add Part</button>
+          </div>
+        </div>
+
+        <!-- Parts Table -->
+        <div class="table-container"
+          style="max-height: 320px; overflow-y: auto; border: 1px solid var(--border-light); border-radius: var(--radius-sm); margin-top: 14px;">
+          <table class="parts-table" style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background: var(--bg-alt); font-size: 11px; text-transform: uppercase; color: #64748b;">
+                <th style="padding: 8px 12px; width: 36px; text-align: center;">#</th>
+                <th style="padding: 8px 12px; text-align: left;">Part Description / Code</th>
+                <th style="padding: 8px 12px; text-align: center; width: 60px;">Qty</th>
+                <th style="padding: 8px 12px; text-align: right; width: 90px;">Cost (₹)</th>
+                <th style="padding: 8px 12px; text-align: center; width: 155px;">Status & Logged Time</th>
+                <th style="padding: 8px 12px; text-align: center; width: 135px;">Arrival Action</th>
+                <th style="padding: 8px 12px; text-align: center; width: 44px;"></th>
+              </tr>
+            </thead>
+            <tbody id="mgmtPartsTableBody">
+              <!-- Rendered via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between;">
+        <button type="button" class="btn btn-outline btn-sm" id="btnMgmtMarkAllArrived">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            style="vertical-align:-1px;margin-right:4px;">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          Mark All as Arrived
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" data-close="modalManageParts">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL: PARTS ARRIVAL DETAILS WITH LOGGED TIMESTAMPS -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalPartsArrivalDetails" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3 id="partsArrivalDetailsModalTitle">Parts Arrival Details</h3>
+          <p class="modal-sub" id="partsArrivalDetailsModalSub">Logged arrival timestamps and verification records.</p>
+        </div>
+        <button class="modal-close" data-close="modalPartsArrivalDetails">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 16px 20px;">
+        <div id="partsArrivalDetailsContent">
+          <!-- Rendered via JS -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary btn-sm" data-close="modalPartsArrivalDetails">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 9: REGISTER NEW CUSTOMER & VEHICLE -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalNewCustomer" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3>+ Register New Customer Profile</h3>
+          <p class="modal-sub">Create a customer profile, tag to a workshop branch, and record notes.</p>
+        </div>
+        <button class="modal-close" data-close="modalNewCustomer">&times;</button>
+      </div>
+      <form id="formNewCustomerModal" autocomplete="off">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="regCustName">Customer Full Name <span class="req">*</span></label>
+              <input type="text" id="regCustName" class="form-input" placeholder="e.g. Ramesh Kumar" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="regCustPhone">Primary Mobile Number <span class="req">*</span></label>
+              <input type="tel" id="regCustPhone" class="form-input" placeholder="10-digit mobile number" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="regCustAltPhones">Alternate Phone(s) (Optional)</label>
+            <input type="text" id="regCustAltPhones" class="form-input" placeholder="e.g. 9876543210, 8884442220">
+          </div>
+          <div class="form-group">
+            <label>Tagged Workshop Branches (Select multiple)</label>
+            <div class="branch-pill-selector" id="regCustBranchesContainer">
+              <!-- Dynamically populated with branch selection pills -->
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="regCustNotes">Customer Notes & Remarks (Optional)</label>
+            <textarea id="regCustNotes" class="form-input" rows="3"
+              placeholder="Preferences, VIP customer notes, service instructions..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalNewCustomer">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveNewCustomer">Save Customer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 9B: EDIT CUSTOMER PROFILE -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalEditCustomer" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3>Edit Customer Profile</h3>
+          <p class="modal-sub">Update contact info, workshop branch tags, and customer notes.</p>
+        </div>
+        <button class="modal-close" data-close="modalEditCustomer">&times;</button>
+      </div>
+      <form id="formEditCustomerModal" autocomplete="off">
+        <input type="hidden" id="editCustId">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="editCustName">Customer Full Name <span class="req">*</span></label>
+              <input type="text" id="editCustName" class="form-input" placeholder="e.g. Ramesh Kumar" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="editCustPhone">Primary Mobile Number <span class="req">*</span></label>
+              <input type="tel" id="editCustPhone" class="form-input" placeholder="10-digit mobile number" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="editCustAltPhones">Alternate Phone(s)</label>
+            <input type="text" id="editCustAltPhones" class="form-input" placeholder="e.g. 9876543210, 8884442220">
+          </div>
+          <div class="form-group">
+            <label>Tagged Workshop Branches (Select multiple)</label>
+            <div class="branch-pill-selector" id="editCustBranchesContainer">
+              <!-- Dynamically populated with branch selection pills -->
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="editCustNotes">Customer Notes & Remarks</label>
+            <textarea id="editCustNotes" class="form-input" rows="3"
+              placeholder="Preferences, VIP customer notes, service instructions..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalEditCustomer">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveEditCustomer">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 9C: ADD VEHICLE TO CUSTOMER -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalAddCustomerVehicle" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3>+ Add Vehicle</h3>
+          <p class="modal-sub" id="addVehModalSubtitle">Register a new Honda motorcycle or scooter to customer account.
+          </p>
+        </div>
+        <button class="modal-close" data-close="modalAddCustomerVehicle">&times;</button>
+      </div>
+      <form id="formAddCustomerVehicle" autocomplete="off">
+        <input type="hidden" id="addVehCustomerId">
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="addVehModel">Honda Vehicle Model <span class="req">*</span></label>
+              <input type="text" id="addVehModel" class="form-input" list="hondaModelsDatalist"
+                placeholder="e.g. Activa 6G, CB350, Shine..." required>
+              <datalist id="hondaModelsDatalist">
+                <option value="Activa 6G">
+                <option value="Activa 125">
+                <option value="Dio 110">
+                <option value="Dio 125">
+                <option value="Shine 100">
+                <option value="Shine 125">
+                <option value="SP 125">
+                <option value="SP 160">
+                <option value="Unicorn 160">
+                <option value="Hornet 2.0">
+                <option value="CB200X">
+                <option value="H'ness CB350">
+                <option value="CB350RS">
+                <option value="CB300F">
+                <option value="CB300R">
+                <option value="NX500">
+                <option value="XL750 Transalp">
+                <option value="Africa Twin">
+              </datalist>
+            </div>
+            <div class="form-group flex-1">
+              <label for="addVehColor">Color / Paint Code</label>
+              <input type="text" id="addVehColor" class="form-input" placeholder="e.g. Pearl Siren Blue, Matte Grey...">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="addVehPlate">Registration License Plate <span class="req">*</span></label>
+              <input type="text" id="addVehPlate" class="form-input text-uppercase font-mono"
+                placeholder="e.g. KA-01-AB-1234" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="addVehVin">Chassis / VIN (Optional)</label>
+              <input type="text" id="addVehVin" class="form-input text-uppercase font-mono"
+                placeholder="17-character VIN" maxlength="17">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalAddCustomerVehicle">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveAddVehicle">Add Vehicle</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 9D: CUSTOMER NOTES & REMARKS -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalCustomerNotes" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div class="cust-notes-modal-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+          </div>
+          <div>
+            <h3 id="custNotesModalTitle">Customer Notes & Remarks</h3>
+            <p class="modal-sub" id="custNotesModalSubtitle">Special preferences, VIP remarks, and service instructions.
+            </p>
+          </div>
+        </div>
+        <button class="modal-close" data-close="modalCustomerNotes">&times;</button>
+      </div>
+      <form id="formCustomerNotesModal" autocomplete="off">
+        <input type="hidden" id="custNotesCustomerId">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="custNotesTextInput">Notes / Special Instructions</label>
+            <textarea id="custNotesTextInput" class="form-input" rows="5"
+              placeholder="Add preferences, VIP customer notes, scratch warnings, delivery requirements..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+          <button type="button" class="btn btn-outline btn-sm" id="btnCustomerNotesClear"
+            style="color: #dc2626; border-color: #fca5a5;">
+            Clear Note
+          </button>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn btn-outline btn-sm" data-close="modalCustomerNotes">Cancel</button>
+            <button type="submit" class="btn btn-primary btn-sm" id="btnSaveCustomerNotes">Save Notes</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 10: ADD / ASSIGN SURVEYOR TO INSURER -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalAddSurveyor" style="display: none;">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <div>
+          <h3>+ Add Authorized Surveyor</h3>
+          <p class="modal-sub">Assign an authorized surveyor to this insurance company.</p>
+        </div>
+        <button class="modal-close" data-close="modalAddSurveyor">&times;</button>
+      </div>
+      <form id="formAddSurveyorModal" autocomplete="off">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="survModalInsurerSelect">Insurance Company <span class="req">*</span></label>
+            <select id="survModalInsurerSelect" class="form-select" required>
+              <!-- Populated by JS -->
+            </select>
+          </div>
+          <div class="form-group" id="survModalSelectGroup">
+            <label for="survModalExistingSelect">Select Existing Surveyor <span class="req">*</span></label>
+            <select id="survModalExistingSelect" class="form-select">
+              <!-- Populated with existing surveyors -->
+            </select>
+            <div style="margin-top: 6px;">
+              <a href="javascript:void(0)" id="btnToggleNewSurveyor"
+                style="font-size: 11.5px; color: #2563eb; text-decoration: none; font-weight: 500;">
+                + Or register a new surveyor in directory
+              </a>
+            </div>
+          </div>
+          <div id="newSurveyorFields"
+            style="display: none; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 12px;">
+            <div class="form-group" style="margin-bottom: 8px;">
+              <label for="survModalName" style="font-size: 11.5px;">New Surveyor Name <span class="req">*</span></label>
+              <input type="text" id="survModalName" class="form-input" placeholder="e.g. Rajesh Sharma">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="survModalPhone" style="font-size: 11.5px;">New Surveyor Mobile Phone <span
+                  class="req">*</span></label>
+              <input type="tel" id="survModalPhone" class="form-input" placeholder="10-digit mobile number">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalAddSurveyor">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveNewSurveyor">Link Surveyor</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 11: ADD INSURANCE COMPANY -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalAddInsurer" style="display: none;">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <div>
+          <h3>+ Add Insurance Company</h3>
+          <p class="modal-sub">Register a new partner insurance provider or fleet account.</p>
+        </div>
+        <button class="modal-close" data-close="modalAddInsurer">&times;</button>
+      </div>
+      <form id="formAddInsurerModal" autocomplete="off">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="insurerModalName">Insurance Company Name <span class="req">*</span></label>
+            <input type="text" id="insurerModalName" class="form-input" placeholder="e.g. HDFC ERGO, Oriental Insurance"
+              required>
+          </div>
+          <div class="form-group">
+            <label for="insurerModalContact">Contact Info / Toll-Free / Portal</label>
+            <input type="text" id="insurerModalContact" class="form-input"
+              placeholder="e.g. 1800-2666 / claims@hdfcergo.com">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalAddInsurer">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveNewInsurer">Add Insurance</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 11B: EDIT INSURANCE COMPANY -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalEditInsurer" style="display: none;">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <div>
+          <h3>Edit Insurance Company</h3>
+          <p class="modal-sub">Update partner company name and official contact/portal info.</p>
+        </div>
+        <button class="modal-close" data-close="modalEditInsurer">&times;</button>
+      </div>
+      <form id="formEditInsurerModal" autocomplete="off">
+        <input type="hidden" id="editInsurerId">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="editInsurerName">Insurance Company Name <span class="req">*</span></label>
+            <input type="text" id="editInsurerName" class="form-input"
+              placeholder="e.g. ICICI Lombard General Insurance" required>
+          </div>
+          <div class="form-group">
+            <label for="editInsurerContact">Contact Info / Toll-Free / Portal</label>
+            <input type="text" id="editInsurerContact" class="form-input"
+              placeholder="e.g. 1800-2666 / claims@hdfcergo.com">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalEditInsurer">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveEditInsurer">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL 11C: EDIT SURVEYOR PROFILE -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalEditSurveyor" style="display: none;">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <div>
+          <h3>Edit Surveyor Profile</h3>
+          <p class="modal-sub">Update surveyor contact details and authorized insurers.</p>
+        </div>
+        <button class="modal-close" data-close="modalEditSurveyor">&times;</button>
+      </div>
+      <form id="formEditSurveyorModal" autocomplete="off">
+        <input type="hidden" id="editSurveyorId">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="editSurveyorName">Surveyor Full Name <span class="req">*</span></label>
+            <input type="text" id="editSurveyorName" class="form-input" placeholder="e.g. Rajesh Sharma" required>
+          </div>
+          <div class="form-group">
+            <label for="editSurveyorPhone">Mobile Phone Number <span class="req">*</span></label>
+            <input type="tel" id="editSurveyorPhone" class="form-input" placeholder="10-digit mobile number" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalEditSurveyor">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveEditSurveyor">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL: REGISTER VEHICLE (FLEET MASTER) -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalRegisterVehicleMaster" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3>+ Register Vehicle</h3>
+          <p class="modal-sub">Add a vehicle to dealership fleet and associate with a customer.</p>
+        </div>
+        <button class="modal-close" data-close="modalRegisterVehicleMaster">&times;</button>
+      </div>
+      <form id="formRegisterVehicleMaster" autocomplete="off">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="regVehCustomerSelect">Customer / Vehicle Owner <span class="req">*</span></label>
+            <select id="regVehCustomerSelect" class="form-select" required>
+              <option value="">-- Select Registered Customer --</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="regVehModel">Honda Vehicle Model <span class="req">*</span></label>
+              <input type="text" id="regVehModel" class="form-input" list="hondaModelsDatalist"
+                placeholder="e.g. Activa 6G, CB350, Shine..." required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="regVehColor">Color / Paint Code</label>
+              <input type="text" id="regVehColor" class="form-input" placeholder="e.g. Pearl Siren Blue, Matte Grey...">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="regVehPlate">Registration License Plate <span class="req">*</span></label>
+              <input type="text" id="regVehPlate" class="form-input text-uppercase font-mono"
+                placeholder="e.g. KL-01-AB-1234" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="regVehVin">Chassis / VIN (Optional)</label>
+              <input type="text" id="regVehVin" class="form-input text-uppercase font-mono"
+                placeholder="17-character VIN" maxlength="17">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalRegisterVehicleMaster">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveRegisterVehicleMaster">Register Vehicle</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL: EDIT VEHICLE DETAILS -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalEditVehicleMaster" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3>Edit Vehicle Profile</h3>
+          <p class="modal-sub">Update vehicle details, registration plate, or assign customer.</p>
+        </div>
+        <button class="modal-close" data-close="modalEditVehicleMaster">&times;</button>
+      </div>
+      <form id="formEditVehicleMaster" autocomplete="off">
+        <input type="hidden" id="editVehId">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="editVehCustomerSelect">Customer / Vehicle Owner</label>
+            <select id="editVehCustomerSelect" class="form-select">
+              <option value="">-- No Customer Assigned --</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="editVehModel">Honda Vehicle Model <span class="req">*</span></label>
+              <input type="text" id="editVehModel" class="form-input" list="hondaModelsDatalist" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="editVehColor">Color / Paint Code</label>
+              <input type="text" id="editVehColor" class="form-input">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="editVehPlate">Registration License Plate <span class="req">*</span></label>
+              <input type="text" id="editVehPlate" class="form-input text-uppercase font-mono" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="editVehVin">Chassis / VIN</label>
+              <input type="text" id="editVehVin" class="form-input text-uppercase font-mono" maxlength="17">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalEditVehicleMaster">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveEditVehicleMaster">Save Vehicle Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL: EDIT VEHICLE MODEL -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalEditVehicleModelMaster" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3>Edit Vehicle Model</h3>
+          <p class="modal-sub">Update vehicle model name across fleet and customer records.</p>
+        </div>
+        <button class="modal-close" data-close="modalEditVehicleModelMaster">&times;</button>
+      </div>
+      <form id="formEditVehicleModelMaster" autocomplete="off">
+        <input type="hidden" id="editVehModelKey">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="editVehModelName">Vehicle Model Name <span class="req">*</span></label>
+            <input type="text" id="editVehModelName" class="form-input" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalEditVehicleModelMaster">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveEditVehicleModelMaster">Save Model Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL: ADD PART TO MASTER CATALOG & STOCK -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalAddPartMaster" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3>+ Add Part to Stock</h3>
+          <p class="modal-sub">Register a new spare part item into Honda inventory catalog.</p>
+        </div>
+        <button class="modal-close" data-close="modalAddPartMaster">&times;</button>
+      </div>
+      <form id="formAddPartMaster" autocomplete="off">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="addPartName">Part Name / Description <span class="req">*</span></label>
+            <input type="text" id="addPartName" class="form-input"
+              placeholder="e.g. Front Brake Disc, Spark Plug, Clutch Cable..." required>
+          </div>
+          <div class="form-group">
+            <label for="addPartCode">Part Code / SKU / OEM Number</label>
+            <input type="text" id="addPartCode" class="form-input text-uppercase font-mono"
+              placeholder="e.g. HD-BRK-01, 45120-KZZ-901">
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="addPartDefaultCost">Default Unit Price (₹) <span class="req">*</span></label>
+              <input type="number" id="addPartDefaultCost" class="form-input font-mono" min="0" step="0.5"
+                placeholder="0.00" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="addPartStockQty">Initial Stock Quantity <span class="req">*</span></label>
+              <input type="number" id="addPartStockQty" class="form-input font-mono" min="0" step="1" placeholder="0"
+                value="1" required>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalAddPartMaster">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveAddPartMaster">Add to Stock</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL: EDIT PART DETAILS & STOCK -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalEditPartMaster" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3>Edit Part Details</h3>
+          <p class="modal-sub">Update part specifications, default unit pricing, and stock on hand.</p>
+        </div>
+        <button class="modal-close" data-close="modalEditPartMaster">&times;</button>
+      </div>
+      <form id="formEditPartMaster" autocomplete="off">
+        <input type="hidden" id="editPartId">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="editPartName">Part Name / Description <span class="req">*</span></label>
+            <input type="text" id="editPartName" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label for="editPartCode">Part Code / SKU / OEM Number</label>
+            <input type="text" id="editPartCode" class="form-input text-uppercase font-mono">
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="editPartDefaultCost">Default Unit Price (₹) <span class="req">*</span></label>
+              <input type="number" id="editPartDefaultCost" class="form-input font-mono" min="0" step="0.5" required>
+            </div>
+            <div class="form-group flex-1">
+              <label for="editPartStockQty">Stock Quantity in Hand <span class="req">*</span></label>
+              <input type="number" id="editPartStockQty" class="form-input font-mono" min="0" step="1" required>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" data-close="modalEditPartMaster">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveEditPartMaster">Save Part Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL: PART CONSUMPTION DETAILS & USAGE HISTORY      -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalPartDetailsCompact" style="display: none;">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <div>
+          <h3 id="partDetailsCompactTitle">Part Specifications & Usage</h3>
+          <p class="modal-sub" id="partDetailsCompactSub">Catalog specifications and ticket consumption history.</p>
+        </div>
+        <button class="modal-close" data-close="modalPartDetailsCompact">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 16px 20px;">
+        <div id="partDetailsCompactHeader"
+          style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+          <!-- Populated by JS -->
+        </div>
+        <div
+          style="font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 8px;">
+          Service Ticket Consumption History
+        </div>
+        <div style="max-height: 380px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px;">
+          <table class="compact-data-table" id="partDetailsConsumptionTable">
+            <thead>
+              <tr>
+                <th style="width: 130px;">Ticket #</th>
+                <th>Customer & Vehicle</th>
+                <th style="width: 70px; text-align: center;">Qty</th>
+                <th style="width: 100px;">Unit Cost</th>
+                <th style="width: 110px;">Total Cost</th>
+                <th style="width: 120px;">Status</th>
+                <th style="width: 90px; text-align: right;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="partDetailsConsumptionBody">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between;">
+        <div id="partDetailsCompactActions">
+          <!-- Populated by JS -->
+        </div>
+        <button type="button" class="btn btn-outline btn-compact" data-close="modalPartDetailsCompact">Close</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ==================================================== -->
+  <!-- RIGHT-CLICK TICKET CONTEXT MENU -->
+  <!-- ==================================================== -->
+  <div id="ticketContextMenu" class="context-menu" style="display: none;">
+    <div class="context-menu-header">
+      <span class="ctx-ticket-no" id="ctxTicketNo">TCK-2026-001</span>
+      <span class="ctx-stage-tag" id="ctxTicketStage">Stage #1</span>
+    </div>
+    <div class="context-menu-divider"></div>
+    <button type="button" class="context-menu-item" id="ctxActionViewPage">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+        <polyline points="15 3 21 3 21 9"></polyline>
+        <line x1="10" y1="14" x2="21" y2="3"></line>
+      </svg>
+      <span>Open Full Ticket Page</span>
+    </button>
+    <button type="button" class="context-menu-item" id="ctxActionTimeline">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <polyline points="12 6 12 12 16 14"></polyline>
+      </svg>
+      <span>Timeline</span>
+    </button>
+    <button type="button" class="context-menu-item" id="ctxActionComment">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+      </svg>
+      <span>Add Note / Comment</span>
+    </button>
+    <button type="button" class="context-menu-item" id="ctxActionPartsOrder" style="display: none;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <path
+          d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+        </path>
+        <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+        <line x1="12" y1="22.08" x2="12" y2="12"></line>
+      </svg>
+      <span>Parts (Add & Mark Arrived)</span>
+    </button>
+    <button type="button" class="context-menu-item" id="ctxActionPartsArrivalDetails" style="display: none;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+      </svg>
+      <span>Parts Arrival Details</span>
+    </button>
+    <button type="button" class="context-menu-item" id="ctxActionBypass">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+      </svg>
+      <span>Direct Delivery Bypass</span>
+    </button>
+    <div class="context-menu-divider"></div>
+    <button type="button" class="context-menu-item item-danger" id="ctxActionDelete">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+      <span>Delete Ticket</span>
+    </button>
+  </div>
+
+  <!-- FULLSCREEN LOGIN OVERLAY -->
+  <div id="loginOverlay" class="login-overlay">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="login-logo-circle">H</div>
+        <div class="login-brand-text">
+          <h2>HONDA <span>SERVICE</span></h2>
+
+        </div>
+      </div>
+
+      <div class="login-header-desc">
+        <h3>Sign In</h3>
+      </div>
+
+      <div id="loginAlertBox" class="login-alert" style="display: none;"></div>
+
+      <form id="loginForm" autocomplete="off">
+        <div class="login-field">
+          <label for="loginUsername">Username</label>
+          <div class="login-input-wrap">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+            <input type="text" id="loginUsername" placeholder="Enter username" required autofocus
+              autocomplete="username">
+          </div>
+        </div>
+
+        <div class="login-field">
+          <label for="loginPassword">Password</label>
+          <div class="login-input-wrap">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            <input type="password" id="loginPassword" placeholder="Enter password" required
+              autocomplete="current-password">
+            <button type="button" class="btn-toggle-pwd" id="btnToggleLoginPwd" title="Show/Hide password">
+              <svg id="pwdEyeIcon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-login-submit" id="btnLoginSubmit">
+          <span class="btn-text">Sign In</span>
+          <span class="btn-spinner" style="display: none;"></span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ADMIN USER MANAGEMENT MODAL -->
+  <div id="modalUserManagement" class="modal-overlay" style="display: none;">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon-badge">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+          </div>
+          <div>
+            <h3>User Management & Role Permissions</h3>
+            <p class="modal-sub">Create accounts, reset passwords, and assign granular stage permissions.</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close" id="btnCloseUserManagement">&times;</button>
+      </div>
+
+      <div class="user-mgmt-toolbar">
+        <div class="user-search-box">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="inputSearchUsers" placeholder="Filter users by name or role...">
+        </div>
+        <button type="button" class="btn btn-primary" id="btnOpenCreateUser">
+          <span>+ Add User</span>
+        </button>
+      </div>
+
+      <div class="modal-body-scroll">
+        <div class="user-table-wrap">
+          <table class="user-mgmt-table">
+            <thead>
+              <tr>
+                <th>User / Display Name</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Stage Permissions Matrix</th>
+                <th style="text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="usersTableBody">
+              <!-- Dynamically rendered rows -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <span class="user-mgmt-count" id="userMgmtCount">Showing 0 users</span>
+        <button type="button" class="btn btn-outline" id="btnCloseUserManagementBottom">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- USER CREATE / EDIT MODAL WITH 13-STAGE PERMISSIONS MATRIX -->
+  <div id="modalUserForm" class="modal-overlay" style="display: none;">
+    <div class="modal modal-xl">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon-badge">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="8.5" cy="7" r="4"></circle>
+              <line x1="20" y1="8" x2="20" y2="14"></line>
+              <line x1="23" y1="11" x2="17" y2="11"></line>
+            </svg>
+          </div>
+          <div>
+            <h3 id="userFormTitle">Add New User</h3>
+            <p class="modal-sub">Configure user identity and granular 13-stage access rights.</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close" id="btnCloseUserForm">&times;</button>
+      </div>
+
+      <form id="userForm">
+        <input type="hidden" id="userFormId" value="">
+
+        <div class="modal-body-scroll">
+          <div class="user-form-grid">
+            <div class="form-group">
+              <label for="userFormUsername">Username <span class="text-danger">*</span></label>
+              <input type="text" id="userFormUsername" required placeholder="e.g. john_service" class="form-input">
+              <small class="form-hint">Used for login. Unique lowercase identifier.</small>
+            </div>
+
+            <div class="form-group">
+              <label for="userFormDisplayName">Display Name</label>
+              <input type="text" id="userFormDisplayName" placeholder="e.g. John Doe (Service Advisor)"
+                class="form-input">
+              <small class="form-hint">Shown on UI, top bar, and stage audit logs.</small>
+            </div>
+
+            <div class="form-group">
+              <label for="userFormPassword" id="userFormPasswordLabel">Password <span
+                  class="text-danger">*</span></label>
+              <input type="password" id="userFormPassword" placeholder="Enter password" class="form-input">
+              <small class="form-hint" id="userFormPasswordHint">Set initial account password.</small>
+            </div>
+
+            <div class="form-group">
+              <label for="userFormRole">Account Role <span class="text-danger">*</span></label>
+              <select id="userFormRole" class="form-select">
+                <option value="user">Standard User (Subject to Stage Permissions)</option>
+                <option value="admin">Administrator (Full Access Everywhere + Manage Users)</option>
+              </select>
+              <small class="form-hint">Admins have full access across all 13 stages.</small>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 12px; margin-bottom: 20px;">
+            <label class="custom-checkbox-label">
+              <input type="checkbox" id="userFormActive" checked>
+              <span>Account is Active (Uncheck to temporarily deactivate user)</span>
+            </label>
+          </div>
+
+          <!-- 13-STAGE PERMISSIONS MATRIX SECTION -->
+          <div class="stage-matrix-container" id="stageMatrixContainer">
+            <div class="stage-matrix-header">
+              <div class="stage-matrix-title">
+                <h4>13-Stage Granular Permissions</h4>
+                <p>Assign Read (view tickets), Write (edit/advance stage), and Delete permissions per workshop stage.
+                </p>
+              </div>
+              <div class="matrix-presets-toolbar">
+                <span class="preset-label">Quick Presets:</span>
+                <button type="button" class="btn-preset" id="btnPresetFull">Full Access (All 13)</button>
+                <button type="button" class="btn-preset" id="btnPresetReadOnly">Read Only All</button>
+                <button type="button" class="btn-preset" id="btnPresetFloor">Workshop Floor (Stages 6-9)</button>
+                <button type="button" class="btn-preset" id="btnPresetClear">Clear All</button>
+              </div>
+            </div>
+
+            <div class="admin-full-notice" id="adminFullNotice" style="display: none;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              </svg>
+              <span>Administrator accounts automatically bypass all stage restrictions with full Read, Write, and Delete
+                rights across all 13 stages.</span>
+            </div>
+
+            <div class="matrix-table-wrap">
+              <table class="stage-matrix-table" id="stageMatrixTable">
+                <thead>
+                  <tr>
+                    <th style="width: 45%;">Pipeline Stage</th>
+                    <th style="width: 18%; text-align: center;" class="th-perm-read">
+                      <span>Read</span>
+                      <small>(View Stage)</small>
+                    </th>
+                    <th style="width: 18%; text-align: center;" class="th-perm-write">
+                      <span>Write</span>
+                      <small>(Advance/Edit)</small>
+                    </th>
+                    <th style="width: 18%; text-align: center;" class="th-perm-delete">
+                      <span>Delete</span>
+                      <small>(Delete Ticket)</small>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody id="stageMatrixTbody">
+                  <!-- Generated for stages 1 to 13 -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btnCancelUserForm">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSaveUser">Save User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ADMIN RESET PASSWORD MODAL -->
+  <div id="modalResetPassword" class="modal-overlay" style="display: none;">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon-badge">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+          </div>
+          <div>
+            <h3>Reset User Password</h3>
+            <p class="modal-sub" id="resetPasswordUserLabel">Setting new password for user</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close" id="btnCloseResetPassword">&times;</button>
+      </div>
+      <form id="resetPasswordForm">
+        <input type="hidden" id="resetPasswordUserId" value="">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="resetPasswordInput">New Password <span class="text-danger">*</span></label>
+            <input type="password" id="resetPasswordInput" required placeholder="Enter new password" class="form-input">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btnCancelResetPassword">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSubmitResetPassword">Update Password</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- USER SELF-SERVICE CHANGE PASSWORD MODAL -->
+  <div id="modalChangePassword" class="modal-overlay" style="display: none;">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon-badge">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+          </div>
+          <div>
+            <h3>Change Password</h3>
+            <p class="modal-sub">Update your account login password</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close" id="btnCloseChangePassword">&times;</button>
+      </div>
+      <form id="changePasswordForm">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="changePasswordCurrent">Current Password <span class="text-danger">*</span></label>
+            <input type="password" id="changePasswordCurrent" required placeholder="Enter current password"
+              class="form-input">
+          </div>
+          <div class="form-group">
+            <label for="changePasswordNew">New Password <span class="text-danger">*</span></label>
+            <input type="password" id="changePasswordNew" required placeholder="Enter new password" class="form-input">
+          </div>
+          <div class="form-group">
+            <label for="changePasswordConfirm">Confirm New Password <span class="text-danger">*</span></label>
+            <input type="password" id="changePasswordConfirm" required placeholder="Confirm new password"
+              class="form-input">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="btnCancelChangePassword">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSubmitChangePassword">Save New Password</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/js/vendor/supabase.js"></script>
+  <script src="js/app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,66 @@
+{
+  "name": "honda-service-ticket-app",
+  "version": "1.0.0",
+  "description": "Honda Vehicle Service Ticketing Kanban App with strict Working-Days SLA tracking",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "electron": "electron .",
+    "electron:dev": "electron . --dev",
+    "server": "node server/server.js",
+    "server:dev": "node --watch server/server.js",
+    "build:exe": "electron-builder --win portable",
+    "dist": "electron-builder --win",
+    "pack": "electron-builder --dir",
+    "test": "node test/testRunner.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.23.0"
+  },
+  "type": "commonjs",
+  "keywords": [
+    "kanban",
+    "service-ticket",
+    "sla-tracker",
+    "automotive",
+    "honda"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.honda.serviceticket",
+    "productName": "Honda Service Ticket SLA",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "electron/icon.ico"
+    },
+    "files": [
+      "electron/**/*",
+      "server/**/*",
+      "public/**/*",
+      "config/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": ".env",
+        "to": ".env"
+      }
+    ]
+  }
+}

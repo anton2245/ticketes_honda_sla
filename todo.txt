@@ -1,0 +1,18 @@
+# Future Enhancements & Integration Roadmap (TODO)
+# Vehicle Service Ticketing System - Honda
+
+[ ] 1. End-of-Day (EOD) Manager Email Alert Push via Google Apps Script (GAS)
+    - Build Google Apps Script Web App receiver with doPost(e) handler to accept JSON breach summaries.
+    - Script formats HTML email table of breached tickets grouped by outlet, days overdue, chassis, and customer details.
+    - Hook up the frontend "Send EOD Breach Report" executive button to dispatch payload to GAS Web App endpoint.
+    - Add authentication token/key validation between Node app and Google Apps Script.
+
+[ ] 2. Automated Scheduled Cron Job for Breach Reports
+    - Add node-cron or system cron runner in Node.js backend.
+    - Configure automated trigger (e.g. daily at 18:30 workshop closing time).
+    - Automatically generate and dispatch the breach digest without requiring manual executive button click.
+
+[ ] 3. Google Sheets (GSheet) Workshop Synchronization
+    - Set up Google Sheets API service account / Google Apps Script sync endpoint.
+    - Automatically append or sync ticket rows to a centralized Master Service Google Sheet upon ticket creation, stage updates, and ticket closure.
+    - Enable two-way status lookup and executive dashboard reporting in Google Sheets.

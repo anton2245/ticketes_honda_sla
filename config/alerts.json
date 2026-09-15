@@ -1,0 +1,10 @@
+{
+  "gasWebAppUrl": "",
+  "enabled": false,
+  "notificationEmails": [
+    "service.manager@honda-dealer.com",
+    "bodyshop.head@honda-dealer.com"
+  ],
+  "defaultOutletCode": "ALL",
+  "note": "Placeholder config. Once Google Apps Script is deployed, paste the Web App URL in gasWebAppUrl."
+}

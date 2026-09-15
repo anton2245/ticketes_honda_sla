@@ -1,0 +1,138 @@
+Vehicle Service Ticketing System
+Purpose
+Each stage must be completed within the specified maximum SLA (working days) from the previous stage or else it need to be flagged.
+WD = Working Day
+
+Vehicle Service Ticket Workflow
+No.
+Stage
+What is Logged / Required
+Maximum SLA
+1
+Vehicle Arrival
+Create a ticket with Customer Name, Phone Number, Vehicle Name and Chassis Number.
+Starting Point
+2
+Estimate Preparation
+Confirm estimate preparation. Enter damaged parts and estimated cost.
+2 WD
+3
+Insurance Intimation
+Log date after estimate is sent to the Insurance Company. Enter Insurance Company Name.
+1 WD
+4
+Survey
+Log when Surveyor visits the facility. Enter Surveyor Name and Phone Number.
+3 WD
+5
+Approval
+Log the date when the Surveyor approves the intimation.
+2 WD
+6
+Parts Order
+Order required parts if they are not available. This stage is optional.
+1 WD
+7
+Parts Arrival
+Log when ordered parts arrive. Applicable only when a Parts Order has been created.
+10 WD max
+8
+Work Start
+Log the date when repair work starts. Work can start after approval and when required parts are available.
+2 WD
+9
+Work Complete
+Log the date when all repair work is completed. Vehicle becomes eligible for customer pickup.
+3 WD
+10
+Invoice
+Log the date when the invoice is sent to the customer.
+1 WD
+11
+Resurvey
+Log the date when the Surveyor completes the resurvey, if required.
+2 WD
+12
+Customer Delivery / Final SLA
+Vehicle is delivered to the customer and the ticket is marked Complete.
+15 WD
+
+
+Process Flow
+Vehicle Arrival
+↓ 2 WD
+Estimate Preparation
+↓ 1 WD
+Insurance Intimation
+↓ 3 WD
+Survey
+↓ 2 WD
+Approval
+↓ 1 WD (if parts need to be ordered)
+
+
+(if parts need to be ordered)
+{
+Parts Order
+↓ 10 WD max
+Parts Arrival
+↓ 2 WD
+}
+Work Start
+↓ 3 WD
+Work Complete
+↓ 1 WD
+Invoice
+↓ 2 WD (if resurvey is required)
+Resurvey
+↓ 15 WD
+Customer Delivery / Ticket Closure
+
+Important SLA Rules
+1. Working Days
+All SLA calculations are based on working days (WD), not calendar days.
+2. Optional Parts Order
+Parts Order is required only when the necessary parts are not available.
+If all required parts are already available, the ticket can move directly from Approval → Work Start.
+3. Parts Arrival
+Parts Arrival applies only to tickets where a Parts Order has been created.
+4. Work Start
+Work should start within the specified SLA after approval, provided the required parts are available.
+5. Resurvey
+Resurvey is applicable only when required by the Insurance Company/Surveyor.
+6. Final Closure
+The ticket is considered fully completed only after the vehicle is delivered to the customer and the final SLA is marked complete.
+Ticket Information
+Every ticket should maintain, at minimum:
+Ticket Number
+Vehicle Arrival Date
+Customer Name
+Customer Phone Number
+Vehicle Name
+Chassis Number
+Estimate Date
+Damage Parts
+Estimated Cost
+Insurance Intimation Date
+Insurance Company
+Survey Date
+Surveyor Name
+Surveyor Phone Number
+Approval Date
+Parts Order Date (if applicable)
+Parts Arrival Date (if applicable)
+Work Start Date
+Work Complete Date
+Invoice Date
+Resurvey Date (if applicable)
+Customer Delivery Date
+Ticket Closure Date
+SLA Status
+SLA Status
+Each stage should automatically show:
+🟢 Within SLA
+🟠 SLA Due Soon
+🔴 SLA Breached
+⚪ Not Started / Pending
+✅ Completed
+
