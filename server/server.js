@@ -24,12 +24,25 @@ const cors = require('cors');
 const db = require('./db');
 const slaEngine = require('./slaEngine');
 const alertService = require('./alertService');
+const stockSync = require('./stockSync');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+
+// Raw binary body parser for Excel spreadsheets upload
+app.use('/api/stock/upload-xlsx', express.raw({
+  type: [
+    'application/octet-stream',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    '*/*'
+  ],
+  limit: '60mb'
+}));
+
+app.use(express.json({ limit: '60mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Serve Supabase JS client for browser / Electron
@@ -50,9 +63,16 @@ app.get('/api/config/supabase-client', (req, res) => {
   });
 });
 
-// Initialize database schema and seeds on startup
-db.initDb().then(() => {
+// Initialize database schema, seeds, and physical stock model on startup
+db.initDb().then(async () => {
   console.log('✓ Supabase PostgreSQL database initialized successfully.');
+  try {
+    const pool = await db.getPool();
+    await stockSync.ensureStockSchema(pool);
+    console.log('✓ Physical stock schema and indexes verified.');
+  } catch (err) {
+    console.error('Physical stock schema initialization warning:', err.message);
+  }
 }).catch(err => {
   console.error('Failed to initialize database:', err);
 });
@@ -433,6 +453,18 @@ app.get('/api/lookup/parts', async (req, res) => {
   }
 });
 
+app.get('/api/lookup/part-locators', async (req, res) => {
+  try {
+    const code = req.query.code || req.query.partCode || req.query.part_code || '';
+    const name = req.query.name || req.query.partName || req.query.part_name || '';
+    const locators = await db.getPartLocators(code, name);
+    res.json(locators);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 app.get('/api/lookup/insurers', async (req, res) => {
   try {
     const q = req.query.q || '';
@@ -495,7 +527,28 @@ app.get('/api/tickets', optionalAuthenticate, async (req, res) => {
     const outletId = req.query.branchId || req.query.outletId;
     const stageId = req.query.stageId || req.query.stage;
     const { slaStatus, search, column, dateField, startDate, endDate } = req.query;
-    let query = `SELECT * FROM tickets WHERE 1=1`;
+    let query = `
+      SELECT t.*,
+        COALESCE(tp_stats.total_parts, 0) AS total_parts_count,
+        COALESCE(tp_stats.insurance_approved_count, 0) AS insurance_approved_count,
+        CASE WHEN t.current_stage_id > 5 THEN COALESCE(tp_stats.pca_count, 0) ELSE 0 END AS pca_count,
+        CASE WHEN t.current_stage_id > 5 THEN COALESCE(tp_stats.ca_count, 0) ELSE 0 END AS ca_count,
+        CASE WHEN t.current_stage_id >= 6 THEN COALESCE(tp_stats.pod_count, 0) ELSE 0 END AS pod_count,
+        COALESCE(tp_stats.arrived_count, 0) AS arrived_parts_count
+      FROM tickets t
+      LEFT JOIN (
+        SELECT ticket_id,
+          COUNT(*) AS total_parts,
+          SUM(CASE WHEN insurance_approved = 1 OR company_approved = 1 THEN 1 ELSE 0 END) AS insurance_approved_count,
+          SUM(CASE WHEN UPPER(COALESCE(customer_approval_status, '')) = 'PENDING' THEN 1 ELSE 0 END) AS pca_count,
+          SUM(CASE WHEN UPPER(COALESCE(customer_approval_status, '')) = 'APPROVED' THEN 1 ELSE 0 END) AS ca_count,
+          SUM(CASE WHEN UPPER(COALESCE(part_status, '')) = 'ORDERED' THEN 1 ELSE 0 END) AS pod_count,
+          SUM(CASE WHEN UPPER(COALESCE(part_status, '')) = 'ARRIVED' THEN 1 ELSE 0 END) AS arrived_count
+        FROM ticket_parts
+        GROUP BY ticket_id
+      ) tp_stats ON tp_stats.ticket_id = t.id
+      WHERE 1=1
+    `;
     const params = [];
 
     if (outletId && outletId !== 'ALL') {
@@ -503,10 +556,10 @@ app.get('/api/tickets', optionalAuthenticate, async (req, res) => {
         .map(x => Number(String(x).trim()))
         .filter(x => !isNaN(x) && x > 0);
       if (outletIds.length === 1) {
-        query += ` AND outlet_id = ?`;
+        query += ` AND t.outlet_id = ?`;
         params.push(outletIds[0]);
       } else if (outletIds.length > 1) {
-        query += ` AND outlet_id IN (${outletIds.map(() => '?').join(',')})`;
+        query += ` AND t.outlet_id IN (${outletIds.map(() => '?').join(',')})`;
         params.push(...outletIds);
       }
     }
@@ -516,16 +569,16 @@ app.get('/api/tickets', optionalAuthenticate, async (req, res) => {
         .map(x => Number(String(x).trim()))
         .filter(x => !isNaN(x) && x > 0);
       if (stageIds.length === 1) {
-        query += ` AND current_stage_id = ?`;
+        query += ` AND t.current_stage_id = ?`;
         params.push(stageIds[0]);
       } else if (stageIds.length > 1) {
-        query += ` AND current_stage_id IN (${stageIds.map(() => '?').join(',')})`;
+        query += ` AND t.current_stage_id IN (${stageIds.map(() => '?').join(',')})`;
         params.push(...stageIds);
       }
     }
 
     if (column && column !== 'ALL') {
-      query += ` AND status = ?`;
+      query += ` AND t.status = ?`;
       params.push(column);
     }
 
@@ -544,11 +597,11 @@ app.get('/api/tickets', optionalAuthenticate, async (req, res) => {
       };
       const targetCol = allowedDateFields[dateField] || 'arrival_date';
       if (startDate) {
-        query += ` AND ${targetCol} >= ?`;
+        query += ` AND t.${targetCol} >= ?`;
         params.push(startDate.includes('T') ? startDate : `${startDate}T00:00:00.000Z`);
       }
       if (endDate) {
-        query += ` AND ${targetCol} <= ?`;
+        query += ` AND t.${targetCol} <= ?`;
         params.push(endDate.includes('T') ? endDate : `${endDate}T23:59:59.999Z`);
       }
     }
@@ -556,19 +609,19 @@ app.get('/api/tickets', optionalAuthenticate, async (req, res) => {
     if (search && search.trim()) {
       const term = `%${search.trim()}%`;
       query += ` AND (
-        ticket_number LIKE ? 
-        OR customer_name LIKE ? 
-        OR customer_phone LIKE ? 
-        OR vehicle_no LIKE ? 
-        OR vehicle_name LIKE ? 
-        OR model LIKE ? 
-        OR color LIKE ? 
-        OR chassis_number LIKE ?
+        t.ticket_number LIKE ? 
+        OR t.customer_name LIKE ? 
+        OR t.customer_phone LIKE ? 
+        OR t.vehicle_no LIKE ? 
+        OR t.vehicle_name LIKE ? 
+        OR t.model LIKE ? 
+        OR t.color LIKE ? 
+        OR t.chassis_number LIKE ?
       )`;
       params.push(term, term, term, term, term, term, term, term);
     }
 
-    query += ` ORDER BY id DESC;`;
+    query += ` ORDER BY t.id DESC;`;
 
     const rawTickets = await db.all(query, params);
     const now = new Date();
@@ -691,7 +744,28 @@ app.get('/api/tickets', optionalAuthenticate, async (req, res) => {
  */
 app.get('/api/tickets/:id', optionalAuthenticate, async (req, res) => {
   try {
-    const ticket = await db.get('SELECT * FROM tickets WHERE id = ?;', [req.params.id]);
+    const ticket = await db.get(`
+      SELECT t.*,
+        COALESCE(tp_stats.total_parts, 0) AS total_parts_count,
+        COALESCE(tp_stats.insurance_approved_count, 0) AS insurance_approved_count,
+        CASE WHEN t.current_stage_id > 5 THEN COALESCE(tp_stats.pca_count, 0) ELSE 0 END AS pca_count,
+        CASE WHEN t.current_stage_id > 5 THEN COALESCE(tp_stats.ca_count, 0) ELSE 0 END AS ca_count,
+        CASE WHEN t.current_stage_id >= 6 THEN COALESCE(tp_stats.pod_count, 0) ELSE 0 END AS pod_count,
+        COALESCE(tp_stats.arrived_count, 0) AS arrived_parts_count
+      FROM tickets t
+      LEFT JOIN (
+        SELECT ticket_id,
+          COUNT(*) AS total_parts,
+          SUM(CASE WHEN insurance_approved = 1 OR company_approved = 1 THEN 1 ELSE 0 END) AS insurance_approved_count,
+          SUM(CASE WHEN UPPER(COALESCE(customer_approval_status, '')) = 'PENDING' THEN 1 ELSE 0 END) AS pca_count,
+          SUM(CASE WHEN UPPER(COALESCE(customer_approval_status, '')) = 'APPROVED' THEN 1 ELSE 0 END) AS ca_count,
+          SUM(CASE WHEN UPPER(COALESCE(part_status, '')) = 'ORDERED' THEN 1 ELSE 0 END) AS pod_count,
+          SUM(CASE WHEN UPPER(COALESCE(part_status, '')) = 'ARRIVED' THEN 1 ELSE 0 END) AS arrived_count
+        FROM ticket_parts
+        GROUP BY ticket_id
+      ) tp_stats ON tp_stats.ticket_id = t.id
+      WHERE t.id = ?;
+    `, [req.params.id]);
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket not found' });
     }
@@ -715,6 +789,7 @@ app.get('/api/tickets/:id', optionalAuthenticate, async (req, res) => {
     `, [ticket.id]);
 
     const parts = await db.getTicketParts(ticket.id);
+    const partsStats = await db.getTicketPartsStats(ticket.id);
 
     res.json({
       ...ticket,
@@ -728,7 +803,8 @@ app.get('/api/tickets/:id', optionalAuthenticate, async (req, res) => {
       isBreached: stageEval.isBreached,
       isDueSoon: stageEval.isDueSoon,
       logs,
-      parts
+      parts,
+      partsStats
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -828,6 +904,88 @@ app.delete('/api/tickets/:id/parts/:partId', optionalAuthenticate, async (req, r
     await db.deleteTicketPart(req.params.id, req.params.partId);
     const parts = await db.getTicketParts(req.params.id);
     res.json({ success: true, parts });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Get ticket parts approval status & breakdown
+ */
+app.get('/api/tickets/:id/parts-approval', optionalAuthenticate, async (req, res) => {
+  try {
+    const ticket = await db.get('SELECT id, ticket_number, customer_name, customer_phone, vehicle_no, model, current_stage_id, customer_approval_exempt FROM tickets WHERE id = ?;', [req.params.id]);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    const parts = await db.getTicketParts(req.params.id);
+    const stats = await db.getTicketPartsStats(req.params.id);
+    res.json({ success: true, ticket, parts, stats });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Update ticket parts approval statuses and exemptions
+ */
+app.post('/api/tickets/:id/parts-approval', optionalAuthenticate, async (req, res) => {
+  try {
+    const ticket = await db.get('SELECT id, current_stage_id FROM tickets WHERE id = ?;', [req.params.id]);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    if (req.user && req.user.role !== 'admin' && !hasStagePermission(req.user, ticket.current_stage_id, 'write')) {
+      return res.status(403).json({ error: `Permission denied: You do not have write permission for Stage ${ticket.current_stage_id}.` });
+    }
+
+    const { parts, newParts, customerApprovalExempt } = req.body;
+
+    if (Array.isArray(parts) && parts.length > 0) {
+      for (const p of parts) {
+        if (p && p.id) {
+          await db.updateTicketPartApproval(ticket.id, p.id, p);
+        }
+      }
+    }
+
+    if (Array.isArray(newParts) && newParts.length > 0) {
+      for (const np of newParts) {
+        await db.addTicketPart(ticket.id, np);
+      }
+    }
+
+    if (customerApprovalExempt !== undefined) {
+      await db.setTicketCustomerApprovalExempt(ticket.id, customerApprovalExempt);
+    }
+
+    await db.refreshTicketPartsSummary(ticket.id);
+    const updatedParts = await db.getTicketParts(ticket.id);
+    const stats = await db.getTicketPartsStats(ticket.id);
+    const updatedTicket = await db.get('SELECT * FROM tickets WHERE id = ?;', [ticket.id]);
+
+    res.json({ success: true, parts: updatedParts, stats, ticket: updatedTicket });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Bulk mark all pending customer parts as approved for this ticket
+ */
+app.post('/api/tickets/:id/parts-approval/bulk-customer-approve', optionalAuthenticate, async (req, res) => {
+  try {
+    const ticket = await db.get('SELECT id, current_stage_id FROM tickets WHERE id = ?;', [req.params.id]);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    if (req.user && req.user.role !== 'admin' && !hasStagePermission(req.user, ticket.current_stage_id, 'write')) {
+      return res.status(403).json({ error: `Permission denied: You do not have write permission for Stage ${ticket.current_stage_id}.` });
+    }
+
+    await db.run(`
+      UPDATE ticket_parts
+      SET customer_approval_status = 'APPROVED'
+      WHERE ticket_id = ? AND UPPER(COALESCE(customer_approval_status, '')) = 'PENDING';
+    `, [ticket.id]);
+
+    const parts = await db.getTicketParts(ticket.id);
+    const stats = await db.getTicketPartsStats(ticket.id);
+    res.json({ success: true, parts, stats });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1348,7 +1506,9 @@ app.post('/api/tickets/:id/advance', optionalAuthenticate, async (req, res) => {
       resurveyRequired,
       notes,
       parts,
-      partsStatusNote
+      partsStatusNote,
+      partsApproval,
+      customerApprovalExempt
     } = req.body;
 
     if (req.user && req.user.role !== 'admin') {
@@ -1385,14 +1545,24 @@ app.post('/api/tickets/:id/advance', optionalAuthenticate, async (req, res) => {
       // Verify all parts for this ticket are arrived
       const currentParts = await db.getTicketParts(ticket.id);
       if (currentParts.length > 0) {
-        const unarrivedParts = currentParts.filter(p => p.part_status !== 'ARRIVED');
+        const unarrivedParts = currentParts.filter(p => (p.part_status || '').toUpperCase() === 'ORDERED');
         if (unarrivedParts.length > 0) {
           const names = unarrivedParts.map(p => p.part_name).join(', ');
           return res.status(400).json({
-            error: `All parts must be ticked as arrived before proceeding to Parts Arrival. (${unarrivedParts.length} pending: ${names})`
+            error: `All ordered parts must be ticked as arrived before proceeding to Parts Arrival. (${unarrivedParts.length} pending: ${names})`
           });
         }
       }
+    }
+
+    // Handle parts approval checklist updates if submitted during advance (e.g. Stage 5 Approval)
+    if (Array.isArray(partsApproval) && partsApproval.length > 0) {
+      for (const p of partsApproval) {
+        if (p && p.id) {
+          await db.updateTicketPartApproval(ticket.id, p.id, p);
+        }
+      }
+      await db.refreshTicketPartsSummary(ticket.id);
     }
 
     const nowIso = new Date().toISOString();
@@ -1430,6 +1600,13 @@ app.post('/api/tickets/:id/advance', optionalAuthenticate, async (req, res) => {
       if (!resolvedDamagedParts) {
         resolvedDamagedParts = savedPartsResult.summary;
       }
+    }
+
+    if (customerApprovalExempt !== undefined) {
+      const exemptVal = customerApprovalExempt ? 1 : 0;
+      await db.setTicketCustomerApprovalExempt(ticket.id, exemptVal);
+      updateFields.push('customer_approval_exempt = ?');
+      updateParams.push(exemptVal);
     }
 
     if (resolvedDamagedParts) {
@@ -2791,34 +2968,133 @@ app.delete('/api/vehicles/:id', async (req, res) => {
 });
 
 // ==========================================
+// PHYSICAL STOCK SYNCHRONIZATION & INVENTORY
+// ==========================================
+
+/**
+ * Upload an Excel file (.xlsx) to replace physical stock snapshot
+ */
+app.post('/api/stock/upload-xlsx', async (req, res) => {
+  try {
+    let buffer = null;
+    let filename = req.query.filename || 'uploaded_stock.xlsx';
+
+    if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+      buffer = req.body;
+    } else if (req.body && req.body.base64) {
+      buffer = Buffer.from(req.body.base64, 'base64');
+      if (req.body.filename) filename = req.body.filename;
+    } else if (typeof req.body === 'string' && req.body.length > 0) {
+      buffer = Buffer.from(req.body, 'base64');
+    }
+
+    if (!buffer || buffer.length === 0) {
+      return res.status(400).json({ error: 'No Excel file data received. Please provide a binary file or base64 payload.' });
+    }
+
+    const pool = await db.getPool();
+    const result = await stockSync.ingestStockSnapshot(pool, buffer, {
+      filename,
+      syncMode: 'UPLOAD'
+    });
+
+    res.json({
+      success: true,
+      message: `Successfully synchronized physical stock from ${filename}`,
+      stats: result
+    });
+  } catch (err) {
+    console.error('Stock XLSX upload error:', err);
+    res.status(500).json({ error: err.message || 'Failed to process physical stock file' });
+  }
+});
+
+
+/**
+ * Get physical stock status summary & metrics
+ */
+app.get('/api/stock/summary', async (req, res) => {
+  try {
+    const pool = await db.getPool();
+    const summary = await stockSync.getLatestStockSyncSummary(pool);
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Get detailed batches for a given part number
+ */
+app.get('/api/stock/batches/:partNumber', async (req, res) => {
+  try {
+    const pool = await db.getPool();
+    const batches = await stockSync.getPartStockBatches(pool, req.params.partNumber);
+    res.json(batches);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
 // PARTS CATALOG & INVENTORY ENDPOINTS
 // ==========================================
 app.get('/api/parts', async (req, res) => {
   try {
-    const q = req.query.q || '';
+    const q = (req.query.q || '').trim();
+    const paginated = req.query.paginated === 'true';
+    const inStock = req.query.inStock === 'true';
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const offset = parseInt(req.query.offset, 10) || 0;
+
+    if (paginated) {
+      const pool = await db.getPool();
+      const result = await stockSync.searchPartsWithStock(pool, {
+        query: q,
+        inStockOnly: inStock,
+        limit,
+        offset
+      });
+      return res.json(result);
+    }
+
     let sql = `
       SELECT p.*,
-             COALESCE((
-               SELECT SUM(tp.quantity) 
-               FROM ticket_parts tp 
-               WHERE tp.part_name = p.part_name 
-                  OR (tp.part_code IS NOT NULL AND p.part_code IS NOT NULL AND tp.part_code = p.part_code)
-             ), 0) AS total_ordered,
-             COALESCE((
-               SELECT SUM(tp.quantity) 
-               FROM ticket_parts tp 
-               WHERE (tp.part_name = p.part_name OR (tp.part_code IS NOT NULL AND p.part_code IS NOT NULL AND tp.part_code = p.part_code))
-                 AND tp.part_status = 'ORDERED'
-             ), 0) AS pending_ordered
+             COALESCE(tp_agg.total_ordered, 0) AS total_ordered,
+             COALESCE(tp_agg.pending_ordered, 0) AS pending_ordered,
+             COALESCE(pse_agg.entry_count, 0) AS entry_count
       FROM parts p
+      LEFT JOIN (
+        SELECT part_code,
+               SUM(quantity) AS total_ordered,
+               SUM(CASE WHEN part_status = 'ORDERED' THEN quantity ELSE 0 END) AS pending_ordered
+        FROM ticket_parts
+        WHERE part_code IS NOT NULL AND part_code != ''
+        GROUP BY part_code
+      ) tp_agg ON tp_agg.part_code = p.part_code
+      LEFT JOIN (
+        SELECT part_number, COUNT(*) AS entry_count
+        FROM physical_stock_entries
+        WHERE part_number IS NOT NULL AND part_number != ''
+        GROUP BY part_number
+      ) pse_agg ON pse_agg.part_number = p.part_code
     `;
     const params = [];
-    if (q && q.trim()) {
-      const term = `%${q.trim()}%`;
-      sql += ` WHERE p.part_name LIKE ? OR p.part_code LIKE ? `;
-      params.push(term, term);
+    if (q) {
+      const term = `%${q}%`;
+      sql += ` WHERE p.part_name ILIKE ? OR p.part_code ILIKE ? OR COALESCE(p.locators, '') ILIKE ? `;
+      params.push(term, term, term);
     }
-    sql += ` ORDER BY p.part_name ASC;`;
+    sql += ` ORDER BY CASE WHEN p.stock_qty > 0 THEN 0 ELSE 1 END, p.part_code ASC, p.part_name ASC`;
+
+    if (req.query.limit && req.query.limit !== 'all') {
+      const parsedLimit = parseInt(req.query.limit, 10);
+      if (parsedLimit > 0) {
+        sql += ` LIMIT ${parsedLimit}`;
+      }
+    }
+    sql += `;`;
+
     const parts = await db.all(sql, params);
     const enriched = parts.map(p => {
       let stock_status = 'IN_STOCK';
@@ -2845,6 +3121,12 @@ app.get('/api/parts/:id', async (req, res) => {
       ORDER BY tp.id DESC;
     `, [part.part_name, part.part_code || '']);
 
+    let batches = [];
+    if (part.part_code) {
+      const pool = await db.getPool();
+      batches = await stockSync.getPartStockBatches(pool, part.part_code);
+    }
+
     let stock_status = 'IN_STOCK';
     if (part.stock_qty <= 0) stock_status = 'OUT_OF_STOCK';
     else if (part.stock_qty <= 3) stock_status = 'LOW_STOCK';
@@ -2852,6 +3134,7 @@ app.get('/api/parts/:id', async (req, res) => {
     res.json({
       ...part,
       stock_status,
+      batches,
       usage_history: usage
     });
   } catch (err) {
@@ -2944,7 +3227,7 @@ app.delete('/api/parts/:id', async (req, res) => {
 app.get('/api/parts-orders', async (req, res) => {
   try {
     const q = req.query.q || '';
-    const status = req.query.status || '';
+    const status = (req.query.status || '').toUpperCase().trim();
     let sql = `
       SELECT tp.*,
              t.ticket_number,
@@ -2955,7 +3238,8 @@ app.get('/api/parts-orders', async (req, res) => {
              t.current_stage_id,
              t.status AS ticket_status,
              t.outlet_name,
-             t.parts_order_date
+             t.parts_order_date,
+             t.customer_approval_exempt
       FROM ticket_parts tp
       JOIN tickets t ON t.id = tp.ticket_id
     `;
@@ -2963,8 +3247,22 @@ app.get('/api/parts-orders', async (req, res) => {
     const params = [];
 
     if (status && status !== 'ALL') {
-      conditions.push(`tp.part_status = ?`);
-      params.push(status.toUpperCase());
+      if (status === 'PCA') {
+        conditions.push(`t.current_stage_id > 5 AND UPPER(COALESCE(tp.customer_approval_status, '')) = 'PENDING' AND (tp.insurance_approved = 0 OR tp.insurance_approved IS NULL)`);
+      } else if (status === 'CA') {
+        conditions.push(`t.current_stage_id > 5 AND UPPER(COALESCE(tp.customer_approval_status, '')) = 'APPROVED'`);
+      } else if (status === 'POD') {
+        conditions.push(`UPPER(COALESCE(tp.part_status, '')) = 'ORDERED'`);
+      } else if (status === 'ARRIVED') {
+        conditions.push(`UPPER(COALESCE(tp.part_status, '')) = 'ARRIVED'`);
+      } else if (status === 'INSURANCE_APPROVED' || status === 'IA') {
+        conditions.push(`(tp.insurance_approved = 1 OR tp.company_approved = 1)`);
+      } else if (status === 'EXEMPT') {
+        conditions.push(`(UPPER(COALESCE(tp.customer_approval_status, '')) = 'EXEMPT' OR t.customer_approval_exempt = 1)`);
+      } else {
+        conditions.push(`tp.part_status = ?`);
+        params.push(status);
+      }
     }
 
     if (q && q.trim()) {
@@ -2980,6 +3278,50 @@ app.get('/api/parts-orders', async (req, res) => {
     sql += ` ORDER BY tp.id DESC;`;
     const orders = await db.all(sql, params);
     res.json(orders);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Bulk actions on parts orders (Customer Approve, Insurance Approve, Mark Arrived, Mark Ordered, Exempt)
+ */
+app.post('/api/parts-orders/bulk-action', optionalAuthenticate, async (req, res) => {
+  try {
+    const { partIds, action } = req.body;
+    if (!Array.isArray(partIds) || partIds.length === 0) {
+      return res.status(400).json({ error: 'No parts selected for bulk action' });
+    }
+
+    const placeholders = partIds.map(() => '?').join(',');
+    const existingParts = await db.all(`SELECT id, ticket_id FROM ticket_parts WHERE id IN (${placeholders})`, partIds);
+    if (existingParts.length === 0) {
+      return res.status(404).json({ error: 'Selected parts not found' });
+    }
+
+    const nowIso = new Date().toISOString();
+    const act = (action || '').toUpperCase().trim();
+
+    if (act === 'CUSTOMER_APPROVE') {
+      await db.run(`UPDATE ticket_parts SET customer_approval_status = 'APPROVED' WHERE id IN (${placeholders})`, partIds);
+    } else if (act === 'INSURANCE_APPROVE') {
+      await db.run(`UPDATE ticket_parts SET insurance_approved = 1, company_approved = 1, customer_approval_status = 'NONE' WHERE id IN (${placeholders})`, partIds);
+    } else if (act === 'MARK_ARRIVED') {
+      await db.run(`UPDATE ticket_parts SET part_status = 'ARRIVED', arrived_at = ? WHERE id IN (${placeholders})`, [nowIso, ...partIds]);
+    } else if (act === 'MARK_ORDERED') {
+      await db.run(`UPDATE ticket_parts SET part_status = 'ORDERED', arrived_at = NULL WHERE id IN (${placeholders})`, partIds);
+    } else if (act === 'EXEMPT') {
+      await db.run(`UPDATE ticket_parts SET customer_approval_status = 'EXEMPT' WHERE id IN (${placeholders})`, partIds);
+    } else {
+      return res.status(400).json({ error: 'Invalid bulk action. Allowed: CUSTOMER_APPROVE, INSURANCE_APPROVE, MARK_ARRIVED, MARK_ORDERED, EXEMPT' });
+    }
+
+    const affectedTicketIds = [...new Set(existingParts.map(p => p.ticket_id).filter(Boolean))];
+    for (const tId of affectedTicketIds) {
+      await db.refreshTicketPartsSummary(tId);
+    }
+
+    res.json({ success: true, count: partIds.length, affectedTickets: affectedTicketIds.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3023,6 +3365,12 @@ app.delete('/api/parts-orders/:id', async (req, res) => {
     const item = await db.get('SELECT * FROM ticket_parts WHERE id = ?;', [orderId]);
     if (!item) {
       return res.status(404).json({ error: 'Part order item not found' });
+    }
+
+    try {
+      await db.restorePartInventory(item);
+    } catch (err) {
+      console.error('Error restoring inventory on parts order delete:', err.message);
     }
 
     await db.run('DELETE FROM ticket_parts WHERE id = ?;', [orderId]);

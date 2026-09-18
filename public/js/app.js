@@ -52,6 +52,8 @@ const state = {
   parts: [],
   selectedPartId: null,
   partsFilter: 'all',
+  partsTablePage: 1,
+  partsTablePageSize: '25',
   partsOrders: [],
   partsOrdersFilter: 'all',
   currentUser: null,
@@ -641,6 +643,40 @@ function renderCurrentView() {
   }
 }
 
+function renderTicketPartsBadges(t) {
+  if (!t) return '';
+  const total = Number(t.total_parts_count) || 0;
+  if (total === 0) return '';
+
+  const stageId = Number(t.current_stage_id) || 1;
+  // PCA, CA and Workshop Exemption tags only show after approval stage (Stage > 5)
+  const isAfterApproval = stageId > 5;
+  const pca = isAfterApproval ? (Number(t.pca_count) || 0) : 0;
+  const ca = isAfterApproval ? (Number(t.ca_count) || 0) : 0;
+  const pod = stageId >= 6 ? (Number(t.pod_count) || 0) : 0;
+  const isExempt = isAfterApproval && Number(t.customer_approval_exempt) === 1;
+
+  if (pca === 0 && ca === 0 && pod === 0 && !isExempt) return '';
+
+  let html = `<div class="parts-approval-badges-wrap" onclick="event.stopPropagation();">`;
+
+  if (pca > 0) {
+    html += `<span class="tag-part-lifecycle tag-pca" onclick="openPartsApprovalModal(${t.id})" title="Pending Customer Approval: ${pca}/${total} parts. Click to review or approve.">PCA (${pca}/${total})</span>`;
+  }
+  if (ca > 0) {
+    html += `<span class="tag-part-lifecycle tag-ca" onclick="openPartsApprovalModal(${t.id})" title="Customer Approved: ${ca}/${total} parts. Click to view.">CA (${ca}/${total})</span>`;
+  }
+  if (pod > 0) {
+    html += `<span class="tag-part-lifecycle tag-pod" onclick="openPartsApprovalModal(${t.id})" title="Awaiting Delivery (POD): ${pod}/${total} parts. Click to view.">POD (${pod}/${total})</span>`;
+  }
+  if (isExempt && pca > 0) {
+    html += `<span class="tag-part-lifecycle tag-exempt" onclick="openPartsApprovalModal(${t.id})" title="Workshop Exemption active: Work and ordering proceed without customer pre-approval.">EXEMPT</span>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
 // 3-Column Kanban Board
 function renderKanbanBoard() {
   if (!Array.isArray(state.tickets)) state.tickets = [];
@@ -742,6 +778,7 @@ function createTicketCard(t, isPipeline = false) {
       <div class="card-ref-group">
         <a href="javascript:void(0)" class="card-ticket-no" onclick="event.stopPropagation(); openTicketPage(${t.id})" title="Double-click card or click here to open dedicated ticket page">${t.ticket_number}</a>
         <span class="card-branch-tag">${branchClean}</span>
+        ${renderTicketPartsBadges(t)}
         ${t.parts_status_note ? `
           <button type="button" class="card-note-icon-btn has-note" onclick="event.stopPropagation(); openPartsNoteModal(${t.id})" title="Hold Note: ${escapeHtml(t.parts_status_note)}">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
@@ -1065,7 +1102,12 @@ function renderTableView() {
       openTicketContextMenu(e, t.id);
     });
     tr.innerHTML = `
-      <td><a href="javascript:void(0)" class="card-ticket-no" onclick="event.stopPropagation(); openTicketPage(${t.id})" title="View Details"><strong>${t.ticket_number}</strong></a></td>
+      <td>
+        <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
+          <a href="javascript:void(0)" class="card-ticket-no" onclick="event.stopPropagation(); openTicketPage(${t.id})" title="View Details"><strong>${t.ticket_number}</strong></a>
+          ${renderTicketPartsBadges(t)}
+        </div>
+      </td>
       <td>${escapeHtml(t.branch_name || t.outlet_name)}</td>
       <td>${escapeHtml(t.customer_name)}</td>
       <td><span style="display: inline-flex; align-items: center;">${escapeHtml(t.customer_phone || '')}${renderPhoneCopyBtn(t.customer_phone)}</span></td>
@@ -2504,6 +2546,9 @@ function setupEventListeners() {
       const cost = costInp ? Math.max(0, Number(costInp.value) || 0) : 0;
 
       try {
+        const targetTicket = (state.tickets || []).find(t => String(t.id) === String(ticketId));
+        const initStatus = (targetTicket && Number(targetTicket.current_stage_id) >= 6) ? 'ORDERED' : 'PENDING_ORDER';
+
         const res = await fetch(`/api/tickets/${ticketId}/parts/add`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2513,7 +2558,7 @@ function setupEventListeners() {
             quantity: qty,
             unit_cost: cost,
             total_cost: qty * cost,
-            part_status: 'ORDERED'
+            part_status: initStatus
           })
         });
         if (!res.ok) {
@@ -3137,6 +3182,413 @@ async function handleNewTicketSubmit(e) {
 }
 
 // ====================================================
+// PHYSICAL STOCK & LOCATOR HOVER HELPERS
+// ====================================================
+function renderPartStockHoverPill(part, currentCost = null) {
+  if (!part) return '';
+  const stockQty = Number(part.stock_qty || 0);
+  const locText = part.locators ? String(part.locators).trim() : '';
+  const stockClass = stockQty > 3 ? 'in-stock' : (stockQty > 0 ? 'low-stock' : 'out-stock');
+  const pillText = stockQty > 0 ? `${stockQty} in stock` : 'Out of stock';
+
+  return `
+    <div class="part-stock-pill-wrap" tabindex="0" title="Physical Inventory: ${stockQty} in stock${locText ? ' • Locators: ' + escapeHtml(locText) : ''}. Click QTY to pick warehouse locators and batch prices.">
+      <span class="part-stock-pill ${stockClass}">
+        <span class="stock-dot"></span>
+        <span class="stock-pill-text">${pillText}</span>
+        ${locText ? `<span class="stock-pill-loc-icon">📍</span>` : ''}
+      </span>
+    </div>
+  `;
+}
+
+function renderPartUnregisteredPill() {
+  return `
+    <div class="part-stock-pill-wrap" tabindex="0">
+      <span class="part-stock-pill not-catalog">
+        <span class="stock-dot"></span>
+        <span class="stock-pill-text">Catalog Only</span>
+      </span>
+    </div>
+  `;
+}
+
+// ====================================================
+// WAREHOUSE LOCATORS & BATCH QUANTITY PICKER
+// ====================================================
+let activeLocatorPickerEl = null;
+let activeLocatorBackdropEl = null;
+
+function closePartLocatorPicker() {
+  if (activeLocatorPickerEl) {
+    activeLocatorPickerEl.remove();
+    activeLocatorPickerEl = null;
+  }
+  if (activeLocatorBackdropEl) {
+    activeLocatorBackdropEl.remove();
+    activeLocatorBackdropEl = null;
+  }
+}
+
+async function openPartLocatorPicker({
+  tr = null,
+  qtyInput,
+  costInput,
+  nameInput,
+  partCode = '',
+  recalculateTotal = () => {}
+}) {
+  closePartLocatorPicker();
+
+  const code = partCode || tr?.dataset?.partCode || nameInput?.dataset?.selectedCode || '';
+  const name = nameInput?.value?.trim() || '';
+
+  if (!name && !code) {
+    showToast('Please search and select a part from the catalog first.', 'info');
+    return;
+  }
+
+  let reqQty = Math.max(1, parseInt(qtyInput?.value, 10) || 1);
+  const currentUnitCost = parseFloat(costInput?.value) || 0;
+
+  // Create backdrop
+  const backdrop = document.createElement('div');
+  backdrop.className = 'part-loc-picker-backdrop';
+  backdrop.addEventListener('click', closePartLocatorPicker);
+  document.body.appendChild(backdrop);
+  activeLocatorBackdropEl = backdrop;
+
+  // Create popover container
+  const popover = document.createElement('div');
+  popover.className = 'part-loc-picker-popover';
+  popover.innerHTML = `
+    <div class="plp-header">
+      <div>
+        <div class="plp-title">📦 Pick Locators & Batch Stock</div>
+        <div class="plp-part-title">
+          ${escapeHtml(name)}
+          ${code ? `<span class="plp-sku-badge">${escapeHtml(code)}</span>` : ''}
+        </div>
+      </div>
+      <button type="button" class="plp-btn-close">&times;</button>
+    </div>
+    <div style="padding: 24px; text-align: center; color: #64748b;">
+      <div class="spinner-sm" style="display:inline-block; margin-bottom: 8px;"></div>
+      <div style="font-size: 11.5px; font-weight: 600;">Loading warehouse locators with stock...</div>
+    </div>
+  `;
+  document.body.appendChild(popover);
+  activeLocatorPickerEl = popover;
+
+  // Smart position anchored to qtyInput
+  function updatePosition() {
+    if (!popover || !qtyInput) return;
+    const rect = qtyInput.getBoundingClientRect();
+    const popoverWidth = Math.min(420, window.innerWidth - 24);
+    popover.style.width = `${popoverWidth}px`;
+
+    let left = rect.left + (rect.width / 2) - (popoverWidth / 2);
+    if (left < 12) left = 12;
+    if (left + popoverWidth > window.innerWidth - 12) {
+      left = window.innerWidth - popoverWidth - 12;
+    }
+
+    let top = rect.bottom + 8;
+    const estHeight = 400;
+    if (top + estHeight > window.innerHeight && rect.top > estHeight) {
+      top = Math.max(10, rect.top - estHeight - 8);
+    }
+    popover.style.top = `${top}px`;
+    popover.style.left = `${left}px`;
+  }
+  updatePosition();
+
+  // Close on Escape key
+  const escHandler = (e) => {
+    if (e.key === 'Escape') {
+      closePartLocatorPicker();
+      document.removeEventListener('keydown', escHandler);
+    }
+  };
+  document.addEventListener('keydown', escHandler);
+
+  popover.querySelector('.plp-btn-close').addEventListener('click', closePartLocatorPicker);
+
+  // Fetch positive quantity locators for this part
+  let locators = [];
+  try {
+    const res = await fetch(`/api/lookup/part-locators?code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}`);
+    if (res.ok) {
+      locators = await res.json();
+    }
+  } catch (err) {
+    console.error('Failed to load part locators:', err);
+  }
+
+  // Filter to strictly ensure quantity > 0
+  locators = (locators || []).filter(l => Number(l.available_qty) > 0);
+  const totalAvailableStock = locators.reduce((sum, l) => sum + (Number(l.available_qty) || 0), 0);
+
+  // Initialize pick allocation for each locator
+  let remainingToAllocate = reqQty;
+  locators.forEach(loc => {
+    loc.available_qty = Number(loc.available_qty) || 0;
+    loc.unit_price = Number(loc.unit_price) || currentUnitCost || 0;
+    if (remainingToAllocate > 0) {
+      const take = Math.min(loc.available_qty, remainingToAllocate);
+      loc.pick_qty = take;
+      remainingToAllocate -= take;
+    } else {
+      loc.pick_qty = 0;
+    }
+  });
+
+  function renderPicker() {
+    const totalPicked = locators.reduce((sum, l) => sum + (l.pick_qty || 0), 0);
+    let totalCost = 0;
+    locators.forEach(l => {
+      if (l.pick_qty > 0) {
+        totalCost += l.pick_qty * l.unit_price;
+      }
+    });
+
+    let avgUnitPrice = 0;
+    if (totalPicked > 0) {
+      avgUnitPrice = totalCost / totalPicked;
+    } else if (locators.length > 0) {
+      avgUnitPrice = locators[0].unit_price;
+    } else {
+      avgUnitPrice = currentUnitCost;
+    }
+
+    let pickClass = 'is-matched';
+    if (totalPicked < reqQty) pickClass = 'is-under';
+    else if (totalPicked > reqQty) pickClass = 'is-over';
+
+    const locatorsHtml = locators.length > 0 ? locators.map((loc, idx) => {
+      const isChecked = (loc.pick_qty || 0) > 0;
+      return `
+        <div class="plp-loc-row ${isChecked ? 'is-selected' : ''}" data-idx="${idx}">
+          <label class="plp-check-wrap">
+            <input type="checkbox" class="plp-loc-check" data-idx="${idx}" ${isChecked ? 'checked' : ''}>
+          </label>
+          <div class="plp-loc-info">
+            <span class="plp-loc-name" title="${escapeHtml(loc.locator)}">📍 ${escapeHtml(loc.locator)}</span>
+            <span class="plp-loc-avail-pill">
+              <span class="stock-dot"></span> ${loc.available_qty} in stock
+            </span>
+          </div>
+          <div class="plp-price-col">
+            <span class="plp-unit-price">₹${Number(loc.unit_price).toLocaleString('en-IN')}</span>
+            <span class="plp-price-label">batch price</span>
+          </div>
+          <div class="plp-pick-stepper">
+            <button type="button" class="plp-pqty-btn" data-action="dec" data-idx="${idx}">−</button>
+            <input type="number" class="plp-pick-qty-input" data-idx="${idx}" min="0" max="${loc.available_qty}" value="${loc.pick_qty || 0}">
+            <button type="button" class="plp-pqty-btn" data-action="inc" data-idx="${idx}">+</button>
+          </div>
+        </div>
+      `;
+    }).join('') : `
+      <div class="plp-empty-locators">
+        <div class="plp-empty-loc-title">No Physical Locators with Stock</div>
+        <div style="font-size: 11px;">There is currently 0 stock recorded in warehouse bins for this item. You can specify the required quantity above and set the unit price manually.</div>
+      </div>
+    `;
+
+    popover.innerHTML = `
+      <div class="plp-header">
+        <div>
+          <div class="plp-title">📦 Pick Locators & Batch Stock</div>
+          <div class="plp-part-title">
+            ${escapeHtml(name)}
+            ${code ? `<span class="plp-sku-badge">${escapeHtml(code)}</span>` : ''}
+          </div>
+        </div>
+        <button type="button" class="plp-btn-close">&times;</button>
+      </div>
+
+      <div class="plp-summary-bar">
+        <div class="plp-stat-item">
+          <span class="plp-stat-label">Stock Available</span>
+          <span class="plp-stat-val val-stock">${totalAvailableStock} in stock</span>
+        </div>
+        <div class="plp-stat-item">
+          <span class="plp-stat-label">Required Qty</span>
+          <div class="plp-stepper">
+            <button type="button" class="plp-step-btn" data-step="-1">−</button>
+            <input type="number" class="plp-req-qty-input" min="1" value="${reqQty}">
+            <button type="button" class="plp-step-btn" data-step="1">+</button>
+          </div>
+        </div>
+        <div class="plp-stat-item">
+          <span class="plp-stat-label">Selected Pick</span>
+          <span class="plp-stat-val val-picked ${pickClass}">
+            ${totalPicked} / ${reqQty}
+          </span>
+        </div>
+      </div>
+
+      <div class="plp-body">
+        <div class="plp-section-header">
+          <span>Warehouse Locators (${locators.length} with stock):</span>
+          ${locators.length > 1 ? `<button type="button" class="plp-quick-action-btn" id="plpAutoFillBtn">Auto-fill to Required</button>` : ''}
+        </div>
+        <div class="plp-locators-list">
+          ${locatorsHtml}
+        </div>
+      </div>
+
+      <div class="plp-calc-bar">
+        <div class="plp-calc-text">
+          <span class="plp-calc-title">Average Unit Price (Selected):</span>
+          <span class="plp-calc-sub">${totalPicked > 0 ? `Based on ${totalPicked} units across selected locators` : `Default catalog price`}</span>
+        </div>
+        <div class="plp-avg-val">₹${avgUnitPrice.toFixed(2)}</div>
+      </div>
+
+      <div class="plp-footer">
+        <div class="plp-hint-text">💡 User can edit the unit price manually in the row anytime.</div>
+        <div class="plp-actions">
+          <button type="button" class="btn btn-outline btn-compact plp-btn-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary btn-compact plp-btn-apply">
+            Apply to Row
+          </button>
+        </div>
+      </div>
+    `;
+
+    // Re-bind close & cancel
+    popover.querySelector('.plp-btn-close').addEventListener('click', closePartLocatorPicker);
+    popover.querySelector('.plp-btn-cancel').addEventListener('click', closePartLocatorPicker);
+
+    // Required Qty Stepper
+    const reqInput = popover.querySelector('.plp-req-qty-input');
+    popover.querySelectorAll('.plp-step-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const delta = parseInt(btn.dataset.step, 10);
+        reqQty = Math.max(1, reqQty + delta);
+        renderPicker();
+      });
+    });
+    if (reqInput) {
+      reqInput.addEventListener('change', () => {
+        reqQty = Math.max(1, parseInt(reqInput.value, 10) || 1);
+        renderPicker();
+      });
+    }
+
+    // Auto-fill button
+    const autoFillBtn = popover.querySelector('#plpAutoFillBtn');
+    if (autoFillBtn) {
+      autoFillBtn.addEventListener('click', () => {
+        let remaining = reqQty;
+        locators.forEach(l => {
+          if (remaining > 0) {
+            const take = Math.min(l.available_qty, remaining);
+            l.pick_qty = take;
+            remaining -= take;
+          } else {
+            l.pick_qty = 0;
+          }
+        });
+        renderPicker();
+      });
+    }
+
+    // Locator Checkbox toggle
+    popover.querySelectorAll('.plp-loc-check').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const idx = parseInt(cb.dataset.idx, 10);
+        const loc = locators[idx];
+        if (cb.checked) {
+          const currentlyPicked = locators.reduce((s, l, i) => i !== idx ? s + (l.pick_qty || 0) : s, 0);
+          const rem = Math.max(1, reqQty - currentlyPicked);
+          loc.pick_qty = Math.min(loc.available_qty, rem);
+        } else {
+          loc.pick_qty = 0;
+        }
+        renderPicker();
+      });
+    });
+
+    // Pick Qty Stepper (+ / -)
+    popover.querySelectorAll('.plp-pqty-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        const action = btn.dataset.action;
+        const loc = locators[idx];
+        if (action === 'inc') {
+          if (loc.pick_qty < loc.available_qty) {
+            loc.pick_qty = (loc.pick_qty || 0) + 1;
+          }
+        } else if (action === 'dec') {
+          if (loc.pick_qty > 0) {
+            loc.pick_qty = (loc.pick_qty || 0) - 1;
+          }
+        }
+        renderPicker();
+      });
+    });
+
+    // Pick Qty direct input
+    popover.querySelectorAll('.plp-pick-qty-input').forEach(input => {
+      input.addEventListener('change', () => {
+        const idx = parseInt(input.dataset.idx, 10);
+        const loc = locators[idx];
+        let val = parseInt(input.value, 10) || 0;
+        if (val < 0) val = 0;
+        if (val > loc.available_qty) val = loc.available_qty;
+        loc.pick_qty = val;
+        renderPicker();
+      });
+    });
+
+    // Apply button
+    popover.querySelector('.plp-btn-apply').addEventListener('click', () => {
+      const finalPickedQty = locators.reduce((sum, l) => sum + (l.pick_qty || 0), 0);
+      const finalQty = Math.max(1, reqQty);
+
+      if (qtyInput) {
+        qtyInput.value = finalQty;
+        qtyInput.classList.add('price-updated-flash');
+        setTimeout(() => qtyInput.classList.remove('price-updated-flash'), 800);
+      }
+
+      if (costInput) {
+        costInput.value = avgUnitPrice > 0 ? parseFloat(avgUnitPrice.toFixed(2)) : (costInput.value || 0);
+        costInput.classList.add('price-updated-flash');
+        setTimeout(() => costInput.classList.remove('price-updated-flash'), 800);
+      }
+
+      // Update locator summary tag on row
+      const pickedLocs = locators.filter(l => (l.pick_qty || 0) > 0);
+      if (tr) {
+        const locTagEl = tr.querySelector('.part-row-loc-summary-tag');
+        if (locTagEl) {
+          if (pickedLocs.length > 0) {
+            const summaryStr = pickedLocs.map(l => `${l.locator} (${l.pick_qty})`).join(', ');
+            locTagEl.innerHTML = `📍 ${escapeHtml(pickedLocs.length === 1 ? `${pickedLocs[0].locator} (${pickedLocs[0].pick_qty})` : `${pickedLocs.length} Locators`)}`;
+            locTagEl.title = `Picked from: ${summaryStr}`;
+            locTagEl.style.display = 'inline-flex';
+          } else {
+            locTagEl.style.display = 'none';
+          }
+        }
+        tr.dataset.pickedLocators = JSON.stringify(pickedLocs);
+      }
+
+      recalculateTotal();
+      closePartLocatorPicker();
+      showToast(`✓ Qty set to ${finalQty} • Avg Price: ₹${avgUnitPrice.toFixed(2)}`, 'success');
+    });
+  }
+
+  renderPicker();
+}
+
+
+// ====================================================
 // REUSABLE ROW-BY-ROW PARTS TABLE BUILDER
 // ====================================================
 function setupPartsTableBuilder({
@@ -3179,20 +3631,26 @@ function setupPartsTableBuilder({
     tr.className = 'part-builder-row';
 
     const pName = partData.part_name || '';
+    const pCode = partData.part_code || '';
     const pQty = partData.quantity !== undefined ? partData.quantity : 1;
     const pCost = partData.unit_cost !== undefined ? partData.unit_cost : 0;
     const pTotal = Math.round(pQty * pCost);
 
+    if (pCode) tr.dataset.partCode = pCode;
+
     tr.innerHTML = `
       <td style="position: relative;">
         <div class="part-row-input-wrap">
-          <input type="text" class="part-row-input part-row-name" placeholder="Search catalog or custom part..." value="${escapeHtml(String(pName))}" autocomplete="off">
+          <input type="text" class="part-row-input part-row-name" placeholder="Search part #, name, or locator..." value="${escapeHtml(String(pName))}" autocomplete="off" data-selected-code="${escapeHtml(String(pCode))}">
           <span class="part-row-db-action"></span>
         </div>
         <div class="suggestions-box part-sugg-dropdown" style="display:none;"></div>
       </td>
       <td style="text-align: center;">
-        <input type="number" class="part-row-input part-row-qty" value="${pQty}" min="1" step="1" style="text-align: center;">
+        <div class="part-qty-cell-wrap">
+          <input type="number" class="part-row-input part-row-qty part-row-qty-trigger" value="${pQty}" min="1" step="1" style="text-align: center;" title="Click to pick warehouse locators and batch stock">
+          <span class="part-row-loc-summary-tag" style="display:none;" title="Assigned warehouse locators"></span>
+        </div>
       </td>
       <td style="text-align: right;">
         <input type="number" class="part-row-input part-row-cost" value="${pCost}" min="0" step="any" style="text-align: right;">
@@ -3212,18 +3670,46 @@ function setupPartsTableBuilder({
     const costInput = tr.querySelector('.part-row-cost');
     const removeBtn = tr.querySelector('.btn-part-row-remove');
 
-    async function checkPartInDb(partName) {
-      if (!partName || !partName.trim()) return null;
-      const clean = partName.trim().toLowerCase();
+    // Populate existing picked locators if present
+    if (partData.picked_locators) {
+      try {
+        const picked = typeof partData.picked_locators === 'string' ? JSON.parse(partData.picked_locators) : partData.picked_locators;
+        if (Array.isArray(picked) && picked.length > 0) {
+          tr.dataset.pickedLocators = JSON.stringify(picked);
+          const locTagEl = tr.querySelector('.part-row-loc-summary-tag');
+          if (locTagEl) {
+            const summaryStr = picked.map(l => `${l.locator} (${l.pick_qty})`).join(', ');
+            locTagEl.innerHTML = `📍 ${escapeHtml(picked.length === 1 ? `${picked[0].locator} (${picked[0].pick_qty})` : `${picked.length} Locators`)}`;
+            locTagEl.title = `Picked from: ${summaryStr}`;
+            locTagEl.style.display = 'inline-flex';
+          }
+        }
+      } catch (e) { }
+    }
+
+    async function checkPartInDb(partName, partCode) {
+      if (!partName && !partCode) return null;
+      const cleanName = (partName || '').trim().toLowerCase();
+      const cleanCode = (partCode || '').trim().toLowerCase();
+
       if (state.parts && state.parts.length > 0) {
-        const found = state.parts.find(p => (p.part_name || '').toLowerCase() === clean);
+        const found = state.parts.find(p =>
+          (cleanCode && (p.part_code || '').toLowerCase() === cleanCode) ||
+          (cleanName && (p.part_name || '').toLowerCase() === cleanName) ||
+          (cleanName && (p.part_code || '').toLowerCase() === cleanName)
+        );
         if (found) return found;
       }
       try {
-        const res = await fetch(`/api/lookup/parts?q=${encodeURIComponent(partName.trim())}`);
+        const term = cleanCode || cleanName;
+        const res = await fetch(`/api/lookup/parts?q=${encodeURIComponent(term)}`);
         if (res.ok) {
           const list = await res.json();
-          return list.find(p => (p.part_name || '').toLowerCase() === clean) || null;
+          return list.find(p =>
+            (cleanCode && (p.part_code || '').toLowerCase() === cleanCode) ||
+            (cleanName && (p.part_name || '').toLowerCase() === cleanName) ||
+            (cleanName && (p.part_code || '').toLowerCase() === cleanName)
+          ) || null;
         }
       } catch (e) { }
       return null;
@@ -3234,58 +3720,31 @@ function setupPartsTableBuilder({
       const clean = (partName || '').trim();
       if (!clean) {
         dbActionEl.innerHTML = '';
+        nameInput.classList.remove('is-invalid-catalog');
         return;
       }
-      const matched = await checkPartInDb(clean);
+      const existingCode = nameInput.dataset.selectedCode || tr.dataset.partCode;
+      const matched = await checkPartInDb(clean, existingCode);
       if (matched) {
-        dbActionEl.innerHTML = `
-          <span class="badge-in-catalog" title="Registered in parts catalog (Stock: ${matched.stock_qty || 0})">
-            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            In DB
-          </span>
-        `;
-      } else {
-        dbActionEl.innerHTML = `
-          <button type="button" class="btn-quick-add-db" title="Save this new part to Parts Database">
-            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-            Add to DB
-          </button>
-        `;
-        const addBtn = dbActionEl.querySelector('.btn-quick-add-db');
-        if (addBtn) {
-          addBtn.onclick = async (e) => {
+        nameInput.classList.remove('is-invalid-catalog');
+        nameInput.dataset.selectedCode = matched.part_code || '';
+        tr.dataset.partCode = matched.part_code || '';
+        dbActionEl.innerHTML = renderPartStockHoverPill(matched, costInput ? costInput.value : null);
+
+        // Clicking the stock pill opens the locator picker!
+        const pillWrap = dbActionEl.querySelector('.part-stock-pill-wrap');
+        if (pillWrap) {
+          pillWrap.style.cursor = 'pointer';
+          pillWrap.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const unitCost = Math.max(0, parseFloat(costInput.value) || 0);
-            try {
-              const addRes = await fetch('/api/parts', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  part_name: clean,
-                  default_cost: unitCost,
-                  stock_qty: 0
-                })
-              });
-              if (addRes.ok) {
-                const created = await addRes.json();
-                if (state.parts) state.parts.push(created);
-                showToast(`✓ Added "${created.part_name}" to Parts Database`, 'success');
-                dbActionEl.innerHTML = `
-                  <span class="badge-in-catalog" title="Registered in parts catalog">
-                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                    In DB
-                  </span>
-                `;
-              } else {
-                const err = await addRes.json();
-                showToast(err.error || 'Failed to add part to DB', 'error');
-              }
-            } catch (err) {
-              showToast('Error adding part: ' + err.message, 'error');
-            }
-          };
+            openPartLocatorPicker({ tr, qtyInput, costInput, nameInput, recalculateTotal });
+          });
         }
+      } else {
+        // Enforce strict catalog only rule: not in catalog
+        nameInput.classList.add('is-invalid-catalog');
+        dbActionEl.innerHTML = renderPartUnregisteredPill();
       }
     }
 
@@ -3297,83 +3756,77 @@ function setupPartsTableBuilder({
         const parts = await res.json();
         suggBox.innerHTML = '';
 
-        const exactMatch = parts.some(p => (p.part_name || '').toLowerCase() === cleanQuery.toLowerCase());
-
         if (parts.length > 0) {
           parts.forEach(p => {
             const itemDiv = document.createElement('div');
-            itemDiv.className = 'suggestion-item';
-            const stockColor = (p.stock_qty || 0) > 3 ? '#059669' : ((p.stock_qty || 0) > 0 ? '#d97706' : '#94a3b8');
-            const stockText = (p.stock_qty || 0) > 0 ? `${p.stock_qty} in stock` : 'Out of stock';
+            itemDiv.className = 'part-sugg-item';
+
+            const stockQty = Number(p.stock_qty || 0);
+            const stockClass = stockQty > 3 ? 'in-stock' : (stockQty > 0 ? 'low-stock' : 'out-stock');
+            const stockText = stockQty > 0 ? `x${stockQty} in stock` : 'Out of stock';
+
+            let pVariants = [];
+            if (p.price_variants) {
+              try {
+                pVariants = typeof p.price_variants === 'string' ? JSON.parse(p.price_variants) : p.price_variants;
+              } catch (e) {}
+            }
+            pVariants = Array.isArray(pVariants) ? pVariants.filter(v => v && typeof v.price === 'number' && v.price > 0) : [];
+
+            let priceHtml = `₹${Number(p.default_cost || 0).toLocaleString('en-IN')}`;
+            if (pVariants.length > 1) {
+              const prices = pVariants.map(v => v.price).sort((a, b) => a - b);
+              const minP = prices[0];
+              const maxP = prices[prices.length - 1];
+              if (minP !== maxP) {
+                priceHtml = `₹${minP.toLocaleString('en-IN')} - ₹${maxP.toLocaleString('en-IN')}`;
+              }
+              priceHtml += `<div style="font-size: 9.5px; color: #2563eb; font-weight: 700; margin-top: 1px;">${pVariants.length} batch prices</div>`;
+            }
 
             itemDiv.innerHTML = `
-              <div>
-                <div style="font-weight: 600; font-size: 12px; color: #0f172a;">${escapeHtml(p.part_name)}</div>
-                ${p.part_code ? `<div style="font-family: var(--font-mono); font-size: 10px; color: #64748b;">SKU: ${escapeHtml(p.part_code)}</div>` : ''}
+              <div class="part-sugg-left">
+                <div class="part-sugg-top">
+                  <span class="part-sugg-code">${escapeHtml(p.part_code || 'NO SKU')}</span>
+                  <span class="part-sugg-desc" title="${escapeHtml(p.part_name || '')}">${escapeHtml(p.part_name || '')}</span>
+                </div>
+                <div class="part-sugg-bottom">
+                  ${p.locators ? `<span class="part-sugg-loc" title="Warehouse Bins / Rack">📍 ${escapeHtml(p.locators)}</span>` : '<span style="font-size:10px; color:#94a3b8;">No Locator</span>'}
+                </div>
               </div>
-              <div style="text-align: right;">
-                <div style="font-family: var(--font-mono); font-weight: 700; font-size: 12px; color: #1e293b;">₹${Number(p.default_cost || 0).toLocaleString('en-IN')}</div>
-                <div style="font-size: 10px; font-weight: 600; color: ${stockColor};">${stockText}</div>
+              <div class="part-sugg-right">
+                <div class="part-sugg-price">${priceHtml}</div>
+                <div class="part-sugg-stock ${stockClass}">${stockText}</div>
               </div>
             `;
+
             itemDiv.addEventListener('mousedown', (e) => {
               e.preventDefault();
               nameInput.value = p.part_name;
+              nameInput.dataset.selectedCode = p.part_code || '';
+              tr.dataset.partCode = p.part_code || '';
               costInput.value = p.default_cost || 0;
+              nameInput.classList.remove('is-invalid-catalog');
               suggBox.style.display = 'none';
               updatePartDbStatus(p.part_name);
               recalculateTotal();
-              qtyInput.focus();
+              // Open locator picker when selecting part from dropdown
+              openPartLocatorPicker({ tr, qtyInput, costInput, nameInput, recalculateTotal });
             });
             suggBox.appendChild(itemDiv);
           });
-        }
-
-        // Add to DB option inside dropdown if typed query is not already in catalog
-        if (cleanQuery.length > 0 && !exactMatch) {
-          const addOption = document.createElement('div');
-          addOption.className = 'suggestion-item sugg-add-db-item';
-          addOption.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 6px;">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-              <span>+ Add "<strong>${escapeHtml(cleanQuery)}</strong>" to Parts DB</span>
-            </div>
-          `;
-          addOption.addEventListener('mousedown', async (e) => {
-            e.preventDefault();
-            nameInput.value = cleanQuery;
-            const unitCost = Math.max(0, parseFloat(costInput.value) || 0);
-            try {
-              const addRes = await fetch('/api/parts', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  part_name: cleanQuery,
-                  default_cost: unitCost,
-                  stock_qty: 0
-                })
-              });
-              if (addRes.ok) {
-                const created = await addRes.json();
-                if (state.parts) state.parts.push(created);
-                showToast(`✓ Added "${created.part_name}" to Parts Database`, 'success');
-              }
-            } catch (err) {
-              console.error(err);
-            }
-            suggBox.style.display = 'none';
-            updatePartDbStatus(cleanQuery);
-            recalculateTotal();
-            costInput.focus();
-          });
-          suggBox.appendChild(addOption);
-        }
-
-        if (suggBox.children.length > 0) {
-          suggBox.style.display = 'block';
         } else {
-          suggBox.style.display = 'none';
+          // Explicit message when no catalog match is found
+          const emptyNotice = document.createElement('div');
+          emptyNotice.style.cssText = 'padding: 12px; font-size: 11.5px; color: #64748b; text-align: center; background: #f8fafc;';
+          emptyNotice.innerHTML = `
+            <div style="font-weight: 600; color: #475569; margin-bottom: 2px;">No matching physical stock items</div>
+            <div style="font-size: 10.5px; color: #94a3b8;">Custom parts cannot be typed directly. Please select from the catalog.</div>
+          `;
+          suggBox.appendChild(emptyNotice);
         }
+
+        suggBox.style.display = 'block';
       } catch (err) {
         console.error('Parts suggestions error:', err);
       }
@@ -3390,6 +3843,7 @@ function setupPartsTableBuilder({
     let debounceTimer = null;
     nameInput.addEventListener('input', () => {
       clearTimeout(debounceTimer);
+      nameInput.dataset.selectedCode = '';
       debounceTimer = setTimeout(() => {
         showSuggestions(nameInput.value);
         updatePartDbStatus(nameInput.value);
@@ -3397,15 +3851,34 @@ function setupPartsTableBuilder({
     });
 
     nameInput.addEventListener('blur', () => {
-      setTimeout(() => { suggBox.style.display = 'none'; }, 220);
-      updatePartDbStatus(nameInput.value);
+      setTimeout(() => {
+        suggBox.style.display = 'none';
+        updatePartDbStatus(nameInput.value);
+      }, 250);
     });
 
     if (pName) {
       updatePartDbStatus(pName);
     }
 
+    qtyInput.addEventListener('click', () => {
+      openPartLocatorPicker({ tr, qtyInput, costInput, nameInput, recalculateTotal });
+    });
+    qtyInput.addEventListener('focus', () => {
+      if (!activeLocatorPickerEl) {
+        openPartLocatorPicker({ tr, qtyInput, costInput, nameInput, recalculateTotal });
+      }
+    });
     qtyInput.addEventListener('input', recalculateTotal);
+
+    const locSummaryTag = tr.querySelector('.part-row-loc-summary-tag');
+    if (locSummaryTag) {
+      locSummaryTag.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openPartLocatorPicker({ tr, qtyInput, costInput, nameInput, recalculateTotal });
+      });
+    }
+
     costInput.addEventListener('input', () => {
       if (costInputEl) costInputEl.dataset.autocalc = 'true';
       recalculateTotal();
@@ -3451,19 +3924,43 @@ function setupPartsTableBuilder({
     getParts: () => {
       const rows = tbodyEl.querySelectorAll('tr.part-builder-row');
       const parts = [];
+      let hasInvalidCatalogPart = false;
+
       rows.forEach(tr => {
-        const name = tr.querySelector('.part-row-name')?.value?.trim();
+        const input = tr.querySelector('.part-row-name');
+        const name = input?.value?.trim();
+        const code = input?.dataset.selectedCode || tr.dataset.partCode || null;
         const qty = parseFloat(tr.querySelector('.part-row-qty')?.value) || 1;
         const cost = parseFloat(tr.querySelector('.part-row-cost')?.value) || 0;
+
+        let pickedLocators = null;
+        if (tr.dataset.pickedLocators) {
+          try {
+            pickedLocators = JSON.parse(tr.dataset.pickedLocators);
+          } catch (e) {
+            pickedLocators = null;
+          }
+        }
+
         if (name) {
+          if (input.classList.contains('is-invalid-catalog')) {
+            hasInvalidCatalogPart = true;
+          }
           parts.push({
             part_name: name,
+            part_code: code,
             quantity: qty,
             unit_cost: cost,
-            total_cost: Math.round(qty * cost)
+            total_cost: Math.round(qty * cost),
+            picked_locators: (pickedLocators && pickedLocators.length > 0) ? pickedLocators : null
           });
         }
       });
+
+      if (hasInvalidCatalogPart) {
+        showToast('Please select all parts from the Physical Stock Catalog dropdown', 'warning');
+      }
+
       return parts;
     }
   };
@@ -3544,9 +4041,7 @@ function buildAdvanceDynamicFields(nextStageId, ticket) {
   if (nextStageId === 2) {
     // Stage 2: Estimate Preparation (Row by row parts addition)
     return `
-      <div class="alert-box warning-box" style="margin-bottom:12px;">
-        <strong>Entering In Progress:</strong> This will start the 2 Working Day SLA for Estimate Preparation.
-      </div>
+
       <div class="parts-builder-section" style="margin-bottom: 12px;">
         <div class="parts-builder-header">
           <label style="font-weight: 700; font-size: 11px; text-transform: uppercase; color: #475569; letter-spacing: 0.3px;">
@@ -3619,31 +4114,187 @@ function buildAdvanceDynamicFields(nextStageId, ticket) {
 
   if (nextStageId === 5) {
     // Stage 5: Approval
+    const partsList = (ticket && Array.isArray(ticket.parts)) ? ticket.parts : [];
+    let partsChecklistHtml = '';
+
+    if (partsList.length > 0) {
+      let iaCount = 0;
+      const rowsHtml = partsList.map(p => {
+        const isIa = p.insurance_approved === 1 || p.company_approved === 1;
+        if (isIa) iaCount++;
+        const cost = Number(p.total_cost || (p.quantity * (p.unit_cost || 0)));
+        return `
+          <div class="stage-part-row" data-part-id="${p.id}">
+            <div class="stage-part-info">
+              <span class="stage-part-name">${escapeHtml(p.part_name)} ${p.part_code ? `(${escapeHtml(p.part_code)})` : ''}</span>
+              <span class="stage-part-cost">Qty: ${p.quantity || 1} • ₹${cost.toLocaleString('en-IN')}</span>
+            </div>
+            <label class="stage-part-checkbox">
+              <input type="checkbox" class="adv-part-ia-cb" ${isIa ? 'checked' : ''}>
+              <span>Insurance Approved</span>
+            </label>
+          </div>
+        `;
+      }).join('');
+
+      const pcaCount = partsList.length - iaCount;
+
+      partsChecklistHtml = `
+        <div class="stage-advance-parts-approval-card">
+          <div class="header-title">
+            <span>Parts Coverage Approval</span>
+            <span id="advStage5Stats" style="font-size: 11px; font-weight: 700; color: #047857;">
+              Insurance Approved: ${iaCount} | Customer to Bear (PCA): ${pcaCount} | Total: ${partsList.length}
+            </span>
+          </div>
+          <div class="subtext">
+            Mark parts approved by Insurance Company. Unchecked parts will automatically be flagged as <strong>Pending Customer Approval (PCA)</strong> to be borne by the customer out-of-pocket.
+          </div>
+          <div class="stage-parts-checklist" id="advPartsApprovalChecklist">
+            ${rowsHtml}
+          </div>
+          <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #e2e8f0;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; font-weight: 600; color: #92400e;">
+              <input type="checkbox" id="advApprovalExemptCb" ${ticket.customer_approval_exempt ? 'checked' : ''}>
+              <span>Workshop Exemption (Order & Start Work without Customer Pre-Approval)</span>
+            </label>
+          </div>
+        </div>
+      `;
+    } else {
+      partsChecklistHtml = `
+        <div class="alert-box" style="background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;margin-bottom:12px;">
+          No parts registered in estimate. You can proceed with labor-only repair approval.
+        </div>
+      `;
+    }
+
     return `
       <div class="alert-box" style="background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;margin-bottom:12px;">
-        Confirm surveyor has approved the estimate.
+        <strong>Surveyor Approval Confirmation:</strong> Mark Insurance Approved parts below.
       </div>
-      <div class="form-group">
-        <label>
-          <input type="checkbox" id="advPartsRequired" ${ticket.parts_order_required ? 'checked' : ''}>
-          <strong>Parts Order Required?</strong> (Check if parts need to be ordered; uncheck to start repair work directly)
-        </label>
+      ${partsChecklistHtml}
+      <div class="form-group" style="margin-top: 10px;">
+        <label for="advJobNotes">Approval / Surveyor Remarks (Optional)</label>
+        <textarea id="advJobNotes" class="form-textarea" rows="2" placeholder="e.g. Surveyor approved front bumper replacement under claim, minor clips to customer..."></textarea>
       </div>
     `;
   }
 
   if (nextStageId === 6) {
-    // Stage 6: Parts Order (Row by row parts review and additional items)
+    // Stage 6: Parts Order (Review approved parts to order, mark critical to start, check claim and customer approvals)
+    const partsList = (ticket && Array.isArray(ticket.parts)) ? ticket.parts : [];
+    let partsChecklistHtml = '';
+
+    if (partsList.length > 0) {
+      let approvedCount = 0;
+      let criticalCount = 0;
+
+      const rowsHtml = partsList.map(p => {
+        const isIa = p.insurance_approved === 1 || p.company_approved === 1;
+        const custStatus = (p.customer_approval_status || '').toUpperCase();
+        const isExempt = ticket.customer_approval_exempt === 1 || custStatus === 'EXEMPT';
+        const isCustApproved = custStatus === 'APPROVED';
+        const isCrit = p.is_critical_to_start === 1;
+        const isAlreadyOrdered = (p.part_status && p.part_status.toUpperCase() === 'ORDERED') && Number(ticket.current_stage_id) >= 6;
+        const isApprovedToOrder = isIa || isCustApproved || isExempt || isAlreadyOrdered;
+
+        if (isApprovedToOrder) approvedCount++;
+        if (isCrit) criticalCount++;
+
+        const cost = Number(p.total_cost || (p.quantity * (p.unit_cost || 0)));
+
+        const claimBadge = isIa
+          ? `<span class="tag-part-lifecycle tag-ia" style="font-size: 10px;" title="Approved under insurance claim"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;margin-right:2px;"><polyline points="20 6 9 17 4 12"></polyline></svg>Claim Approved</span>`
+          : `<span class="tag-part-lifecycle" style="font-size: 10px; background:#fff7ed; color:#c2410c; border:1px solid #fed7aa;" title="Not covered under insurance claim">Claim: Not Covered</span>`;
+
+        let custBadge = '';
+        if (isIa) {
+          custBadge = `<span class="tag-part-lifecycle" style="font-size: 10px; background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0;" title="No customer payment required">Covered by Claim</span>`;
+        } else if (isCustApproved) {
+          custBadge = `<span class="tag-part-lifecycle tag-ca" style="font-size: 10px;" title="Customer approved out-of-pocket payment">Cust. Approved (CA)</span>`;
+        } else if (isExempt) {
+          custBadge = `<span class="tag-part-lifecycle tag-exempt" style="font-size: 10px;" title="Workshop exemption active">Exempt</span>`;
+        } else {
+          custBadge = `
+            <div style="display:inline-flex;align-items:center;gap:4px;">
+              <span class="tag-part-lifecycle tag-pca" style="font-size: 10px;" title="Pending customer approval">Pending Cust. (PCA)</span>
+              <label style="font-size:10px;color:#4338ca;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:3px;margin:0;background:#eef2ff;padding:1px 5px;border-radius:3px;border:1px solid #c7d2fe;" title="Tick to record customer approval now">
+                <input type="checkbox" class="adv-cust-approved-cb" data-part-id="${p.id}" style="width:12px;height:12px;accent-color:#4f46e5;cursor:pointer;">
+                <span>Approve</span>
+              </label>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="stage-part-order-row ${!isApprovedToOrder ? 'row-not-ordered' : ''}" data-part-id="${p.id}">
+            <div class="stage-part-order-left">
+              <input type="checkbox" class="adv-order-approved-cb" id="advOrderPart_${p.id}" data-part-id="${p.id}" ${isApprovedToOrder ? 'checked' : ''} title="Tick to approve ordering this part">
+              <div class="stage-part-info">
+                <label for="advOrderPart_${p.id}" class="stage-part-name" style="cursor:pointer;margin:0;">${escapeHtml(p.part_name)} ${p.part_code ? `(${escapeHtml(p.part_code)})` : ''}</label>
+                <span class="stage-part-cost">Qty: ${p.quantity || 1} • ₹${cost.toLocaleString('en-IN')}</span>
+              </div>
+            </div>
+            <div class="stage-part-order-badges">
+              ${claimBadge}
+              ${custBadge}
+            </div>
+            <div class="stage-part-order-right">
+              <label class="stage-part-critical-label" title="Mark if this part is strictly required before starting repair work (Stage 8)">
+                <input type="checkbox" class="adv-part-critical-cb" data-part-id="${p.id}" ${isCrit ? 'checked' : ''}>
+                <span>Critical to Start</span>
+              </label>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      partsChecklistHtml = `
+        <div class="stage-advance-parts-order-card">
+          <div class="header-title">
+            <span>Parts Order & Procurement Approval</span>
+            <span id="advStage6Stats" style="font-size: 11px; font-weight: 700; color: #1e40af;">
+              Approved to Order: ${approvedCount} / ${partsList.length} | Critical to Start: ${criticalCount}
+            </span>
+          </div>
+          <div class="adv-order-subtext">
+            Tick parts <strong>Approved to Order</strong>. Parts tagged <strong>Critical to Start</strong> must arrive before work start (Stage 8).
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:8px;padding:4px 2px;border-bottom:1px solid #e2e8f0;font-size:11.5px;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;color:#334155;margin:0;">
+              <input type="checkbox" id="advCheckAllApprovedToOrder" ${approvedCount === partsList.length ? 'checked' : ''} style="width:14px;height:14px;accent-color:#2563eb;cursor:pointer;">
+              <span>Select All Approved to Order</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;color:#92400e;margin:0;">
+              <input type="checkbox" id="advOrderExemptCb" ${ticket.customer_approval_exempt ? 'checked' : ''} style="width:14px;height:14px;accent-color:#d97706;cursor:pointer;">
+              <span>Workshop Exemption (Proceed without customer approval)</span>
+            </label>
+          </div>
+          <div class="stage-parts-order-checklist" id="advPartsOrderChecklist">
+            ${rowsHtml}
+          </div>
+        </div>
+      `;
+    } else {
+      partsChecklistHtml = `
+        <div class="alert-box" style="background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;margin-bottom:12px;">
+          No parts registered on this ticket estimate. You can add extra items below if required.
+        </div>
+      `;
+    }
+
     return `
       <div class="alert-box" style="background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;margin-bottom:12px;">
-        <strong>Parts Order Placement:</strong> Review parts to be ordered, adjust quantities, or add additional component rows. SLA allows max 5 working days.
+        <strong>Parts Order Placement:</strong> Review parts to be ordered, tick approved items, and flag critical components. SLA allows max 5 working days.
       </div>
+      ${partsChecklistHtml}
       <div class="parts-builder-section" style="margin-bottom: 12px;">
         <div class="parts-builder-header">
           <label style="font-weight: 700; font-size: 11px; text-transform: uppercase; color: #475569; letter-spacing: 0.3px;">
-            Parts
+            + Add Additional Parts (Unestimated Items)
           </label>
-          <span style="font-size: 11px; color: #94a3b8;">Review parts list or add additional items</span>
+          <span style="font-size: 11px; color: #94a3b8;">Add extra components if needed</span>
         </div>
         <div class="table-container" style="margin-top: 6px; margin-bottom: 8px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); overflow: visible;">
           <table class="parts-builder-table" id="advPartsTable">
@@ -3666,7 +4317,7 @@ function buildAdvanceDynamicFields(nextStageId, ticket) {
             <span>Add Part Item</span>
           </button>
           <div class="parts-total-summary">
-            <span class="parts-total-label">Parts Subtotal:</span>
+            <span class="parts-total-label">Extra Parts Subtotal:</span>
             <span class="parts-total-val" id="advPartsTotalVal">₹0</span>
           </div>
         </div>
@@ -3684,7 +4335,8 @@ function buildAdvanceDynamicFields(nextStageId, ticket) {
 
   if (nextStageId === 7) {
     // Stage 7: Parts Arrival (Enforces ticking all parts to proceed)
-    const partsList = (ticket && Array.isArray(ticket.parts)) ? ticket.parts : [];
+    const allTicketParts = (ticket && Array.isArray(ticket.parts)) ? ticket.parts : [];
+    const partsList = allTicketParts.filter(p => (p.part_status || '').toUpperCase() === 'ORDERED' || (p.part_status || '').toUpperCase() === 'ARRIVED');
     const hasParts = partsList.length > 0;
 
     let partsChecklistHtml = '';
@@ -3929,6 +4581,63 @@ function setupStageSpecificAutocomplete(nextStageId, ticket) {
     }
   }
 
+  // Stage 5: Live Counter Updates for Insurance Approval Checklist
+  if (nextStageId === 5) {
+    const checkItems = document.querySelectorAll('#advPartsApprovalChecklist .adv-part-ia-cb');
+    const statsEl = document.getElementById('advStage5Stats');
+    const updateStats = () => {
+      const total = checkItems.length;
+      let ia = 0;
+      checkItems.forEach(cb => { if (cb.checked) ia++; });
+      const pca = total - ia;
+      if (statsEl) {
+        statsEl.textContent = `Insurance Approved: ${ia} | Customer to Bear (PCA): ${pca} | Total: ${total}`;
+      }
+    };
+    checkItems.forEach(cb => cb.addEventListener('change', updateStats));
+  }
+
+  // Stage 6: Live Counter & Toggle Updates for Parts Order Placement
+  if (nextStageId === 6) {
+    const orderCbs = document.querySelectorAll('#advPartsOrderChecklist .adv-order-approved-cb');
+    const critCbs = document.querySelectorAll('#advPartsOrderChecklist .adv-part-critical-cb');
+    const selectAllCb = document.getElementById('advCheckAllApprovedToOrder');
+    const statsEl = document.getElementById('advStage6Stats');
+
+    const updateStats = () => {
+      const total = orderCbs.length;
+      let approved = 0;
+      let crit = 0;
+      orderCbs.forEach(cb => {
+        if (cb.checked) approved++;
+        const row = cb.closest('.stage-part-order-row');
+        if (row) {
+          if (cb.checked) row.classList.remove('row-not-ordered');
+          else row.classList.add('row-not-ordered');
+        }
+      });
+      critCbs.forEach(cb => { if (cb.checked) crit++; });
+
+      if (statsEl) {
+        statsEl.textContent = `Approved to Order: ${approved} / ${total} | Critical to Start: ${crit}`;
+      }
+      if (selectAllCb) {
+        selectAllCb.checked = total > 0 && approved === total;
+      }
+    };
+
+    orderCbs.forEach(cb => cb.addEventListener('change', updateStats));
+    critCbs.forEach(cb => cb.addEventListener('change', updateStats));
+
+    if (selectAllCb) {
+      selectAllCb.addEventListener('change', () => {
+        const isChecked = selectAllCb.checked;
+        orderCbs.forEach(cb => { cb.checked = isChecked; });
+        updateStats();
+      });
+    }
+  }
+
   // Stage 7: Parts Arrival Checklist Logic & Advance Button Gatekeeper
   if (nextStageId === 7) {
     const confirmBtn = document.getElementById('btnConfirmAdvance');
@@ -4011,6 +4720,65 @@ async function handleAdvanceStageSubmit(e) {
   showGlobalLoader();
 
   const payload = { targetStageId };
+
+  if (targetStageId === 5) {
+    const partRows = document.querySelectorAll('#advPartsApprovalChecklist .stage-part-row');
+    if (partRows.length > 0) {
+      const partsApproval = [];
+      partRows.forEach(row => {
+        const partId = Number(row.dataset.partId);
+        const insApprovedCb = row.querySelector('.adv-part-ia-cb');
+        const isIa = insApprovedCb ? insApprovedCb.checked : false;
+        partsApproval.push({
+          id: partId,
+          insurance_approved: isIa ? 1 : 0,
+          company_approved: isIa ? 1 : 0,
+          customer_approval_status: isIa ? 'NONE' : 'PENDING'
+        });
+      });
+      payload.partsApproval = partsApproval;
+      payload.partsOrderRequired = partsApproval.length > 0;
+    }
+    const exemptCb = document.getElementById('advApprovalExemptCb');
+    if (exemptCb) {
+      payload.customerApprovalExempt = exemptCb.checked;
+    }
+  }
+
+  if (targetStageId === 6) {
+    const orderRows = document.querySelectorAll('#advPartsOrderChecklist .stage-part-order-row');
+    if (orderRows.length > 0) {
+      const partsApproval = [];
+      orderRows.forEach(row => {
+        const partId = Number(row.dataset.partId);
+        const orderApprovedCb = row.querySelector('.adv-order-approved-cb');
+        const criticalCb = row.querySelector('.adv-part-critical-cb');
+        const custApproveCb = row.querySelector('.adv-cust-approved-cb');
+
+        const isApprovedToOrder = orderApprovedCb ? orderApprovedCb.checked : true;
+        const isCritical = criticalCb ? criticalCb.checked : false;
+
+        const updateItem = {
+          id: partId,
+          part_status: isApprovedToOrder ? 'ORDERED' : 'ON_HOLD',
+          is_critical_to_start: isCritical ? 1 : 0
+        };
+
+        if (custApproveCb && custApproveCb.checked) {
+          updateItem.customer_approval_status = 'APPROVED';
+        }
+
+        partsApproval.push(updateItem);
+      });
+      payload.partsApproval = partsApproval;
+      payload.partsOrderRequired = partsApproval.some(p => p.part_status === 'ORDERED');
+    }
+
+    const orderExemptCb = document.getElementById('advOrderExemptCb');
+    if (orderExemptCb) {
+      payload.customerApprovalExempt = orderExemptCb.checked;
+    }
+  }
 
   if (targetStageId === 7) {
     const checkItems = Array.from(document.querySelectorAll('#advPartsArrivalChecklist input.part-check-item:checked'));
@@ -4298,15 +5066,57 @@ window.openTicketPage = async function (ticketId) {
           const unit = Number(p.unit_cost || 0);
           const total = Number(p.total_cost !== undefined ? p.total_cost : (qty * unit));
           partsTotal += total;
+
+          const isIa = p.insurance_approved === 1 || p.company_approved === 1;
+          const custStatus = (p.customer_approval_status || (isIa ? 'NONE' : 'PENDING')).toUpperCase();
+          const isArrived = (p.part_status || '').toUpperCase() === 'ARRIVED';
+
+          let apprBadge = '';
+          const isDrawerAfterApproval = Number(ticket.current_stage_id) > 5;
+          if (isIa) apprBadge = `<span class="tag-part-lifecycle tag-ia" style="font-size: 10px;">Insurance Approved</span>`;
+          else if (!isDrawerAfterApproval) apprBadge = `<span class="tag-part-lifecycle" style="font-size: 10px; background:#f8fafc; color:#64748b; border: 1px solid #cbd5e1;">Awaiting Approval</span>`;
+          else if (custStatus === 'APPROVED') apprBadge = `<span class="tag-part-lifecycle tag-ca" style="font-size: 10px;">Cust. Approved (CA)</span>`;
+          else if (custStatus === 'EXEMPT' || ticket.customer_approval_exempt === 1) apprBadge = `<span class="tag-part-lifecycle tag-exempt" style="font-size: 10px;">Exempt</span>`;
+          else apprBadge = `<span class="tag-part-lifecycle tag-pca" style="font-size: 10px;">Pending Cust. (PCA)</span>`;
+
+          const isOrdered = (p.part_status || '').toUpperCase() === 'ORDERED' && Number(ticket.current_stage_id) >= 6;
+          const isHold = (p.part_status || '').toUpperCase() === 'ON_HOLD';
+
+          const delivBadge = isArrived
+            ? `<span class="badge-part-arrived" style="font-size: 10px; padding: 2px 6px;">ARRIVED</span>`
+            : (isOrdered
+              ? `<span class="badge-part-ordered" style="font-size: 10px; padding: 2px 6px;">ORDERED</span>`
+              : (isHold
+                ? `<span class="badge-part-on-hold" style="font-size: 10px; padding: 2px 6px;">ON HOLD</span>`
+                : `<span class="badge-part-pending-order" style="font-size: 10px; padding: 2px 6px;">PENDING ORDER</span>`));
+
+          const matchedCatalog = (state.parts && state.parts.length > 0)
+            ? state.parts.find(cp =>
+              (p.part_code && (cp.part_code || '').toLowerCase() === p.part_code.toLowerCase()) ||
+              (p.part_name && (cp.part_name || '').toLowerCase() === p.part_name.toLowerCase())
+            )
+            : null;
+
           return `
             <tr>
               <td style="font-weight: 600; color: #1e293b;">
-                ${escapeHtml(p.part_name || 'Part Item')}
-                ${p.part_code ? `<span style="font-size: 11px; color: #64748b; margin-left: 6px;">(${escapeHtml(p.part_code)})</span>` : ''}
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                  <div>
+                    ${escapeHtml(p.part_name || 'Part Item')}
+                    ${p.part_code ? `<span style="font-size: 11px; color: #64748b; margin-left: 6px;">(${escapeHtml(p.part_code)})</span>` : ''}
+                  </div>
+                  ${matchedCatalog ? renderPartStockHoverPill(matchedCatalog) : ''}
+                </div>
               </td>
               <td style="text-align: center;"><span class="badge badge-qty" style="background:#f1f5f9; color:#334155; font-weight:700; padding:2px 7px; border-radius:10px; font-size:11px;">${qty}</span></td>
               <td style="text-align: right; font-family: var(--font-mono); color:#475569;">₹${unit.toLocaleString('en-IN')}</td>
               <td style="text-align: right; font-family: var(--font-mono); font-weight: 700; color: #0f172a;">₹${total.toLocaleString('en-IN')}</td>
+              <td style="text-align: center;">
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 3px;">
+                  ${apprBadge}
+                  ${delivBadge}
+                </div>
+              </td>
             </tr>
           `;
         }).join('');
@@ -4320,13 +5130,23 @@ window.openTicketPage = async function (ticketId) {
         }
 
         partsContainer.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 12px; font-weight: 700; color: #475569;">Parts & Materials (${ticket.parts.length})</span>
+              ${renderTicketPartsBadges(ticket)}
+            </div>
+            <button type="button" class="btn btn-outline btn-xs" onclick="openPartsApprovalModal(${ticket.id})">
+              Manage Approvals
+            </button>
+          </div>
           <table class="tp-parts-table">
             <thead>
               <tr>
-                <th style="width: 48%;">Part Item / Component</th>
-                <th style="width: 14%; text-align: center;">Qty</th>
-                <th style="width: 18%; text-align: right;">Unit Price</th>
-                <th style="width: 20%; text-align: right;">Total</th>
+                <th style="width: 38%;">Part Item / Component</th>
+                <th style="width: 10%; text-align: center;">Qty</th>
+                <th style="width: 16%; text-align: right;">Unit Price</th>
+                <th style="width: 16%; text-align: right;">Total</th>
+                <th style="width: 20%; text-align: center;">Approval & Status</th>
               </tr>
             </thead>
             <tbody>
@@ -4336,6 +5156,7 @@ window.openTicketPage = async function (ticketId) {
               <tr>
                 <td colspan="3" style="text-align: right; font-weight: 700; color: #64748b; font-size: 11.5px;">Parts Subtotal:</td>
                 <td style="text-align: right; font-family: var(--font-mono); font-weight: 800; color: #15803d; font-size: 13px;">₹${partsTotal.toLocaleString('en-IN')}</td>
+                <td></td>
               </tr>
             </tfoot>
           </table>
@@ -5736,6 +6557,481 @@ async function handlePartsNoteSubmit(e) {
     await refreshTickets();
     if (state.mainView === 'ticket-detail' && state.currentEditingTicket && state.currentEditingTicket.id == ticketId) {
       await openTicketPage(ticketId);
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ====================================================
+// PARTS APPROVAL & PROCUREMENT LIFECYCLE CONTROLLER
+// ====================================================
+window.openPartsApprovalModal = async function (ticketId) {
+  try {
+    showGlobalLoader();
+    const res = await fetch(`/api/tickets/${ticketId}/parts-approval`);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to fetch parts approval details');
+    }
+    const data = await res.json();
+    const { ticket, parts, stats } = data;
+
+    state.currentPaTicketId = ticketId;
+    state.currentPaTicket = ticket;
+    state.currentPaParts = Array.isArray(parts) ? parts : [];
+
+    const titleEl = document.getElementById('paModalTitle');
+    if (titleEl) titleEl.textContent = `Parts Approval & Procurement Manager — Ticket #${ticket.ticket_number}`;
+
+    const subEl = document.getElementById('paModalSubtitle');
+    if (subEl) {
+      subEl.textContent = `${ticket.vehicle_no || ticket.model || 'Honda'} • ${ticket.customer_name || 'Customer'} (${ticket.customer_phone || '—'}) • Stage #${ticket.current_stage_id}`;
+    }
+
+    const exemptCb = document.getElementById('paExemptCheckbox');
+    if (exemptCb) {
+      exemptCb.checked = (ticket.customer_approval_exempt === 1);
+    }
+
+    renderPaStatsRibbon(stats);
+    renderPaPartsTable(state.currentPaParts);
+    setupPaNewPartAutocomplete();
+
+    openModal('modalPartsApproval');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    hideGlobalLoader();
+  }
+};
+
+function renderPaStatsRibbon(stats) {
+  if (!stats) return;
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val !== undefined ? val : 0;
+  };
+  setVal('paStatTotal', stats.total_parts);
+  setVal('paStatIa', stats.insurance_approved_count);
+  setVal('paStatPca', stats.pca_count);
+  setVal('paStatCa', stats.ca_count);
+  setVal('paStatPod', stats.pod_count);
+  setVal('paStatArrived', stats.arrived_count);
+}
+
+function updatePaLiveStats() {
+  const rows = document.querySelectorAll('#paPartsTableBody tr.pa-part-row');
+  const total = rows.length;
+  let ia = 0, pca = 0, ca = 0, pod = 0, arrived = 0;
+  const currentStage = state.currentPaTicket ? Number(state.currentPaTicket.current_stage_id) : 1;
+  const isAfterApproval = currentStage > 5;
+
+  rows.forEach(r => {
+    const isIa = r.querySelector('.pa-row-ia-cb')?.checked;
+    const custStatus = (r.querySelector('.pa-row-ca-sel')?.value || '').toUpperCase();
+    const isArrived = r.dataset.status === 'ARRIVED';
+    const isOrdered = r.dataset.status === 'ORDERED';
+
+    if (isIa) ia++;
+    if (isAfterApproval && custStatus === 'PENDING' && !isIa) pca++;
+    if (isAfterApproval && custStatus === 'APPROVED') ca++;
+    if (isArrived) arrived++;
+    else if (isOrdered) pod++;
+  });
+
+  renderPaStatsRibbon({
+    total_parts: total,
+    insurance_approved_count: ia,
+    pca_count: pca,
+    ca_count: ca,
+    pod_count: pod,
+    arrived_count: arrived
+  });
+}
+
+function renderPaPartsTable(parts) {
+  const tbody = document.getElementById('paPartsTableBody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (!parts || parts.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" style="text-align:center; padding: 24px; color: var(--text-muted);">
+          No parts registered for this ticket yet. Add parts below.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  const currentStage = state.currentPaTicket ? Number(state.currentPaTicket.current_stage_id) : 1;
+  const isStage6OrAbove = currentStage >= 6;
+
+  parts.forEach(p => {
+    const tr = document.createElement('tr');
+    tr.className = 'pa-part-row';
+    tr.dataset.partId = p.id;
+
+    const rawStatus = (p.part_status || '').toUpperCase();
+    const isArrived = rawStatus === 'ARRIVED';
+    const isOrdered = rawStatus === 'ORDERED' && isStage6OrAbove;
+    const isHold = rawStatus === 'ON_HOLD';
+    tr.dataset.status = isArrived ? 'ARRIVED' : (isOrdered ? 'ORDERED' : (isHold ? 'ON_HOLD' : 'PENDING_ORDER'));
+
+    const isIa = (p.insurance_approved === 1 || p.company_approved === 1);
+    const custStatus = (p.customer_approval_status || (isIa ? 'NONE' : 'PENDING')).toUpperCase();
+    const isCrit = p.is_critical_to_start === 1;
+    const cost = Number(p.total_cost || (p.quantity * (p.unit_cost || 0)));
+
+    const delivBadge = isArrived
+      ? `<span class="badge-part-arrived" style="font-size: 10px; padding: 2px 6px;">ARRIVED</span>`
+      : (isOrdered
+        ? `<span class="badge-part-ordered" style="font-size: 10px; padding: 2px 6px;">ORDERED</span>`
+        : (isHold
+          ? `<span class="badge-part-on-hold" style="font-size: 10px; padding: 2px 6px;">ON HOLD</span>`
+          : `<span class="badge-part-pending-order" style="font-size: 10px; padding: 2px 6px;">PENDING ORDER</span>`));
+
+    const matchedCatalog = (state.parts && state.parts.length > 0)
+      ? state.parts.find(cp =>
+        (p.part_code && (cp.part_code || '').toLowerCase() === p.part_code.toLowerCase()) ||
+        (p.part_name && (cp.part_name || '').toLowerCase() === p.part_name.toLowerCase())
+      )
+      : null;
+
+    tr.innerHTML = `
+      <td>
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+          <div>
+            <div style="font-weight: 600; color: #1e293b;">${escapeHtml(p.part_name)}</div>
+            ${p.part_code ? `<div style="font-size: 11px; color: #64748b; font-family: var(--font-mono);">${escapeHtml(p.part_code)}</div>` : ''}
+          </div>
+          ${matchedCatalog ? renderPartStockHoverPill(matchedCatalog) : ''}
+        </div>
+      </td>
+      <td style="text-align: center; font-weight: 700; font-family: var(--font-mono);">${p.quantity || 1}</td>
+      <td style="font-family: var(--font-mono); font-weight: 600; color: #334155;">₹${cost.toLocaleString('en-IN')}</td>
+      <td style="text-align: center;">
+        <label class="stage-part-checkbox" style="justify-content: center;">
+          <input type="checkbox" class="pa-row-ia-cb" ${isIa ? 'checked' : ''}>
+          <span>Insurance Approved</span>
+        </label>
+      </td>
+      <td>
+        <select class="form-input form-input-sm pa-row-ca-sel" style="font-size: 11px; padding: 3px 6px;">
+          <option value="NONE" ${custStatus === 'NONE' ? 'selected' : ''}>None (Claim Covered)</option>
+          <option value="PENDING" ${custStatus === 'PENDING' ? 'selected' : ''}>Pending (PCA)</option>
+          <option value="APPROVED" ${custStatus === 'APPROVED' ? 'selected' : ''}>Approved (CA)</option>
+          <option value="REJECTED" ${custStatus === 'REJECTED' ? 'selected' : ''}>Rejected (Do Not Order)</option>
+          <option value="EXEMPT" ${custStatus === 'EXEMPT' ? 'selected' : ''}>Exempt</option>
+        </select>
+      </td>
+      <td style="text-align: center;">
+        <input type="checkbox" class="pa-row-crit-cb" ${isCrit ? 'checked' : ''} title="Critical to start repair work">
+      </td>
+      <td style="text-align: center;">
+        ${delivBadge}
+      </td>
+      <td style="text-align: right;">
+        <button type="button" class="btn btn-outline-danger btn-xs btn-del-pa-row" data-id="${p.id}" data-name="${escapeHtml(p.part_name)}" title="Delete part item">
+          &times;
+        </button>
+      </td>
+    `;
+
+    // Interactive event listeners
+    const iaCb = tr.querySelector('.pa-row-ia-cb');
+    const caSel = tr.querySelector('.pa-row-ca-sel');
+
+    if (iaCb && caSel) {
+      iaCb.addEventListener('change', () => {
+        if (iaCb.checked) {
+          caSel.value = 'NONE';
+        } else {
+          caSel.value = 'PENDING';
+        }
+        updatePaLiveStats();
+      });
+
+      caSel.addEventListener('change', () => {
+        if (caSel.value === 'NONE') {
+          iaCb.checked = true;
+        } else {
+          iaCb.checked = false;
+        }
+        updatePaLiveStats();
+      });
+    }
+
+    const delBtn = tr.querySelector('.btn-del-pa-row');
+    if (delBtn) {
+      delBtn.addEventListener('click', async () => {
+        const pId = delBtn.dataset.id;
+        const pName = delBtn.dataset.name;
+        if (!await showConfirmDialog({
+          title: 'Delete Part Item',
+          message: `Are you sure you want to remove "${pName}" from this ticket?`,
+          confirmText: 'Delete Item',
+          isDanger: true
+        })) return;
+
+        try {
+          const dRes = await fetch(`/api/tickets/${state.currentPaTicketId}/parts/${pId}`, { method: 'DELETE' });
+          if (!dRes.ok) throw new Error('Failed to delete part');
+          showToast(`Part "${pName}" deleted`, 'success');
+          await openPartsApprovalModal(state.currentPaTicketId);
+          refreshTickets().catch(() => { });
+        } catch (e) {
+          showToast(e.message, 'error');
+        }
+      });
+    }
+
+    tbody.appendChild(tr);
+  });
+}
+
+function setupPaNewPartAutocomplete() {
+  const nameInput = document.getElementById('paNewPartName');
+  const codeInput = document.getElementById('paNewPartCode');
+  const costInput = document.getElementById('paNewPartCost');
+  const suggBox = document.getElementById('paNewPartSuggestions');
+  const stockInfoEl = document.getElementById('paNewPartStockInfo');
+  if (!nameInput || !suggBox) return;
+
+  async function showSuggestions(query) {
+    try {
+      const clean = (query || '').trim();
+      const res = await fetch(`/api/lookup/parts?q=${encodeURIComponent(clean)}`);
+      if (!res.ok) return;
+      const parts = await res.json();
+      suggBox.innerHTML = '';
+
+      if (parts.length > 0) {
+        parts.forEach(p => {
+          const item = document.createElement('div');
+          item.className = 'part-sugg-item';
+          const stockQty = Number(p.stock_qty || 0);
+          const stockClass = stockQty > 3 ? 'in-stock' : (stockQty > 0 ? 'low-stock' : 'out-stock');
+          const stockText = stockQty > 0 ? `x${stockQty} in stock` : 'Out of stock';
+
+          let pVariants = [];
+            if (p.price_variants) {
+              try {
+                pVariants = typeof p.price_variants === 'string' ? JSON.parse(p.price_variants) : p.price_variants;
+              } catch (e) {}
+            }
+            pVariants = Array.isArray(pVariants) ? pVariants.filter(v => v && typeof v.price === 'number' && v.price > 0) : [];
+
+            let priceHtml = `₹${Number(p.default_cost || 0).toLocaleString('en-IN')}`;
+            if (pVariants.length > 1) {
+              const prices = pVariants.map(v => v.price).sort((a, b) => a - b);
+              const minP = prices[0];
+              const maxP = prices[prices.length - 1];
+              if (minP !== maxP) {
+                priceHtml = `₹${minP.toLocaleString('en-IN')} - ₹${maxP.toLocaleString('en-IN')}`;
+              }
+              priceHtml += `<div style="font-size: 9.5px; color: #2563eb; font-weight: 700; margin-top: 1px;">${pVariants.length} batch prices</div>`;
+            }
+
+            item.innerHTML = `
+              <div class="part-sugg-left">
+                <div class="part-sugg-top">
+                  <span class="part-sugg-code">${escapeHtml(p.part_code || 'NO SKU')}</span>
+                  <span class="part-sugg-desc" title="${escapeHtml(p.part_name || '')}">${escapeHtml(p.part_name || '')}</span>
+                </div>
+                <div class="part-sugg-bottom">
+                  ${p.locators ? `<span class="part-sugg-loc">📍 ${escapeHtml(p.locators)}</span>` : '<span style="font-size:10px;color:#94a3b8;">No Locator</span>'}
+                </div>
+              </div>
+              <div class="part-sugg-right">
+                <div class="part-sugg-price">${priceHtml}</div>
+                <div class="part-sugg-stock ${stockClass}">${stockText}</div>
+              </div>
+            `;
+
+            item.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              nameInput.value = p.part_name;
+              if (codeInput) codeInput.value = p.part_code || '';
+              if (costInput) costInput.value = p.default_cost || 0;
+              nameInput.dataset.selectedCode = p.part_code || '';
+              nameInput.classList.remove('is-invalid-catalog');
+              suggBox.style.display = 'none';
+              if (stockInfoEl) {
+                stockInfoEl.innerHTML = renderPartStockHoverPill(p, costInput ? costInput.value : null);
+                const pillWrap = stockInfoEl.querySelector('.part-stock-pill-wrap');
+                if (pillWrap) {
+                  pillWrap.style.cursor = 'pointer';
+                  pillWrap.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    openPartLocatorPicker({ qtyInput, costInput, nameInput, partCode: p.part_code, recalculateTotal: () => {} });
+                  });
+                }
+              }
+              openPartLocatorPicker({ qtyInput, costInput, nameInput, partCode: p.part_code, recalculateTotal: () => {} });
+            });
+            suggBox.appendChild(item);
+          });
+        } else {
+        suggBox.innerHTML = `
+          <div style="padding: 10px; font-size: 11px; color: #64748b; text-align: center;">
+            No parts found in catalog. Direct manual part creation is disabled.
+          </div>
+        `;
+      }
+      suggBox.style.display = 'block';
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  nameInput.addEventListener('focus', () => showSuggestions(nameInput.value));
+  nameInput.addEventListener('click', () => showSuggestions(nameInput.value));
+  let timer = null;
+  nameInput.addEventListener('input', () => {
+    clearTimeout(timer);
+    nameInput.dataset.selectedCode = '';
+    if (stockInfoEl) stockInfoEl.innerHTML = '';
+    timer = setTimeout(() => showSuggestions(nameInput.value), 120);
+  });
+  nameInput.addEventListener('blur', () => {
+    setTimeout(() => { suggBox.style.display = 'none'; }, 220);
+  });
+
+  if (qtyInput) {
+    qtyInput.classList.add('part-row-qty-trigger');
+    qtyInput.title = 'Click to pick warehouse locators and batch stock';
+    qtyInput.addEventListener('click', () => {
+      openPartLocatorPicker({
+        qtyInput,
+        costInput,
+        nameInput,
+        partCode: codeInput ? codeInput.value : (nameInput ? nameInput.dataset.selectedCode : ''),
+        recalculateTotal: () => {}
+      });
+    });
+  }
+}
+
+async function handlePaAddPart() {
+  const nameInput = document.getElementById('paNewPartName');
+  const codeInput = document.getElementById('paNewPartCode');
+  const qtyInput = document.getElementById('paNewPartQty');
+  const costInput = document.getElementById('paNewPartCost');
+  const iaInput = document.getElementById('paNewPartInsuranceApproved');
+
+  const name = (nameInput ? nameInput.value : '').trim();
+  const code = (codeInput ? codeInput.value : '').trim() || (nameInput ? nameInput.dataset.selectedCode : null) || null;
+
+  if (!name) {
+    showToast('Please search and select a part from the Physical Stock Catalog', 'warning');
+    if (nameInput) nameInput.focus();
+    return;
+  }
+
+  const qty = Math.max(1, Number(qtyInput?.value) || 1);
+  const cost = Math.max(0, Number(costInput?.value) || 0);
+  const isIa = iaInput?.checked ? 1 : 0;
+
+  try {
+    const res = await fetch(`/api/tickets/${state.currentPaTicketId}/parts/add`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        part_name: name,
+        part_code: code,
+        quantity: qty,
+        unit_cost: cost,
+        insurance_approved: isIa,
+        company_approved: isIa,
+        customer_approval_status: isIa ? 'NONE' : 'PENDING'
+      })
+    });
+    if (!res.ok) throw new Error('Failed to add part item');
+
+    if (nameInput) {
+      nameInput.value = '';
+      nameInput.dataset.selectedCode = '';
+    }
+    if (codeInput) codeInput.value = '';
+    if (costInput) costInput.value = 0;
+    if (qtyInput) qtyInput.value = 1;
+    if (iaInput) iaInput.checked = false;
+    const stockInfoEl = document.getElementById('paNewPartStockInfo');
+    if (stockInfoEl) stockInfoEl.innerHTML = '';
+
+    showToast(`Added "${name}" successfully`, 'success');
+    await openPartsApprovalModal(state.currentPaTicketId);
+    refreshTickets().catch(() => { });
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function handlePaBulkCustomerApprove() {
+  if (!state.currentPaTicketId) return;
+  if (!await showConfirmDialog({
+    title: 'Customer Approve All',
+    message: 'Mark all pending customer parts (PCA) as Customer Approved (CA) for this ticket?',
+    confirmText: 'Approve All'
+  })) return;
+
+  try {
+    const res = await fetch(`/api/tickets/${state.currentPaTicketId}/parts-approval/bulk-customer-approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) throw new Error('Failed to bulk approve customer parts');
+    showToast('✓ All pending parts approved for customer (PCA → CA)', 'success');
+    await openPartsApprovalModal(state.currentPaTicketId);
+    refreshTickets().catch(() => { });
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function handlePaSave() {
+  if (!state.currentPaTicketId) return;
+
+  const rows = document.querySelectorAll('#paPartsTableBody tr.pa-part-row');
+  const partsUpdates = [];
+  rows.forEach(r => {
+    const partId = Number(r.dataset.partId);
+    const isIa = r.querySelector('.pa-row-ia-cb')?.checked ? 1 : 0;
+    const custStatus = r.querySelector('.pa-row-ca-sel')?.value || (isIa ? 'NONE' : 'PENDING');
+    const isCrit = r.querySelector('.pa-row-crit-cb')?.checked ? 1 : 0;
+    partsUpdates.push({
+      id: partId,
+      insurance_approved: isIa,
+      company_approved: isIa,
+      customer_approval_status: custStatus,
+      is_critical_to_start: isCrit
+    });
+  });
+
+  const exempt = document.getElementById('paExemptCheckbox')?.checked ? 1 : 0;
+
+  try {
+    const res = await fetch(`/api/tickets/${state.currentPaTicketId}/parts-approval`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        parts: partsUpdates,
+        customerApprovalExempt: exempt
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to save parts approval');
+    }
+
+    closeModal('modalPartsApproval');
+    showToast('✓ Parts approvals & exemptions saved', 'success');
+    await refreshTickets();
+    if (state.mainView === 'ticket-detail' && state.currentEditingTicket && state.currentEditingTicket.id == state.currentPaTicketId) {
+      await openTicketPage(state.currentPaTicketId);
     }
   } catch (err) {
     showToast(err.message, 'error');
@@ -7326,6 +8622,8 @@ function initSidebar() {
     });
   }
 
+  initStockSyncModal();
+
   const partsSearch = document.getElementById('partsSearchInput');
   if (partsSearch) {
     partsSearch.addEventListener('input', () => {
@@ -7365,6 +8663,11 @@ function initSidebar() {
     });
   }
 
+  const btnExportPartsCsv = document.getElementById('btnExportPartsCsv');
+  if (btnExportPartsCsv) {
+    btnExportPartsCsv.addEventListener('click', exportPartsToCsv);
+  }
+
   const partsOrdersSearch = document.getElementById('partsOrdersSearchInput');
   if (partsOrdersSearch) {
     partsOrdersSearch.addEventListener('input', () => {
@@ -7380,6 +8683,42 @@ function initSidebar() {
       filterPartsOrders();
     });
   });
+
+  const thSelectAll = document.getElementById('thPartsSelectAll');
+  if (thSelectAll) {
+    thSelectAll.addEventListener('change', () => {
+      const isChecked = thSelectAll.checked;
+      document.querySelectorAll('#partsOrdersTableBody .part-row-select').forEach(cb => {
+        cb.checked = isChecked;
+      });
+      updatePartsBulkToolbar();
+    });
+  }
+
+  const btnBulkCust = document.getElementById('btnBulkCustomerApprove');
+  if (btnBulkCust) btnBulkCust.addEventListener('click', () => executePartsBulkAction('CUSTOMER_APPROVE'));
+
+  const btnBulkIns = document.getElementById('btnBulkInsuranceApprove');
+  if (btnBulkIns) btnBulkIns.addEventListener('click', () => executePartsBulkAction('INSURANCE_APPROVE'));
+
+  const btnBulkArr = document.getElementById('btnBulkMarkArrived');
+  if (btnBulkArr) btnBulkArr.addEventListener('click', () => executePartsBulkAction('MARK_ARRIVED'));
+
+  // Parts Approval Modal Events
+  const btnClosePa = document.getElementById('btnClosePartsApproval');
+  if (btnClosePa) btnClosePa.addEventListener('click', () => closeModal('modalPartsApproval'));
+
+  const btnCancelPa = document.getElementById('btnCancelPartsApproval');
+  if (btnCancelPa) btnCancelPa.addEventListener('click', () => closeModal('modalPartsApproval'));
+
+  const btnAddPaItem = document.getElementById('btnPaAddPartItem');
+  if (btnAddPaItem) btnAddPaItem.addEventListener('click', handlePaAddPart);
+
+  const btnBulkCustPa = document.getElementById('btnPaBulkCustomerApprove');
+  if (btnBulkCustPa) btnBulkCustPa.addEventListener('click', handlePaBulkCustomerApprove);
+
+  const btnSavePa = document.getElementById('btnSavePartsApproval');
+  if (btnSavePa) btnSavePa.addEventListener('click', handlePaSave);
 
   const formAddPart = document.getElementById('formAddPartMaster');
   if (formAddPart) {
@@ -7634,11 +8973,11 @@ async function loadDirectoryCounts() {
     const bVeh = document.getElementById('badgeVehiclesCount');
     const bParts = document.getElementById('badgePartsCount');
 
-    if (bCust) bCust.textContent = state.customers.length;
-    if (bIns) bIns.textContent = state.insurers.length;
-    if (bHol) bHol.textContent = state.holidays.length;
-    if (bVeh) bVeh.textContent = state.vehicles.length;
-    if (bParts) bParts.textContent = state.parts.length;
+    if (bCust) bCust.textContent = state.customers.length.toLocaleString();
+    if (bIns) bIns.textContent = state.insurers.length.toLocaleString();
+    if (bHol) bHol.textContent = state.holidays.length.toLocaleString();
+    if (bVeh) bVeh.textContent = state.vehicles.length.toLocaleString();
+    if (bParts) bParts.textContent = state.parts.length.toLocaleString();
   } catch (err) {
     console.warn('Error loading directory counts:', err);
   }
@@ -9316,19 +10655,28 @@ async function loadAndRenderParts() {
     const parts = await res.json();
     state.parts = parts;
 
+    let inStockCount = 0;
     let lowStockCount = 0;
+    let outOfStockCount = 0;
     parts.forEach(p => {
-      if (p.stock_qty > 0 && p.stock_qty <= 3) lowStockCount++;
+      if (p.stock_qty <= 0) outOfStockCount++;
+      else if (p.stock_qty <= 3) lowStockCount++;
+      else inStockCount++;
     });
 
     const statTotal = document.getElementById('partsStatTotal');
+    const statInStock = document.getElementById('partsStatInStock');
     const statLow = document.getElementById('partsStatLow');
+    const statOut = document.getElementById('partsStatOut');
     const bParts = document.getElementById('badgePartsCount');
 
-    if (statTotal) statTotal.textContent = parts.length;
-    if (statLow) statLow.textContent = lowStockCount;
-    if (bParts) bParts.textContent = parts.length;
+    if (statTotal) statTotal.textContent = parts.length.toLocaleString();
+    if (statInStock) statInStock.textContent = inStockCount.toLocaleString();
+    if (statLow) statLow.textContent = lowStockCount.toLocaleString();
+    if (statOut) statOut.textContent = outOfStockCount.toLocaleString();
+    if (bParts) bParts.textContent = parts.length.toLocaleString();
 
+    state.partsDisplayLimit = 100;
     filterPartsList();
 
     // Auto-select part
@@ -9356,7 +10704,12 @@ async function loadAndRenderParts() {
   }
 }
 
-function filterPartsList() {
+function filterPartsList(keepLimit = false) {
+  if (!keepLimit) {
+    state.partsDisplayLimit = 100;
+    state.partsTablePage = 1;
+  }
+
   const searchInput = document.getElementById('partsSearchInput');
   const query = (searchInput ? searchInput.value : '').trim().toLowerCase();
   const filter = state.partsFilter || 'all';
@@ -9374,15 +10727,22 @@ function filterPartsList() {
   if (query) {
     filtered = filtered.filter(p =>
       (p.part_name || '').toLowerCase().includes(query) ||
-      (p.part_code || '').toLowerCase().includes(query)
+      (p.part_code || '').toLowerCase().includes(query) ||
+      (p.locators || '').toLowerCase().includes(query)
     );
   }
 
+  state.lastFilteredParts = filtered;
   renderPartsMasterList(filtered);
 }
 
 function renderPartsMasterList(parts) {
-  renderPartsCards(parts);
+  const limit = state.partsDisplayLimit || 100;
+  const visibleParts = parts.slice(0, limit);
+  const totalCount = parts.length;
+  const hasMore = totalCount > visibleParts.length;
+
+  renderPartsCards(visibleParts, totalCount, hasMore);
   renderPartsDetailsTable(parts);
 
   // Sync view visibility based on state.partsViewMode
@@ -9405,7 +10765,7 @@ function renderPartsMasterList(parts) {
   }
 }
 
-function renderPartsCards(parts) {
+function renderPartsCards(parts, totalCount = parts.length, hasMore = false) {
   const container = document.getElementById('partsCardsContainer');
   if (!container) return;
   container.innerHTML = '';
@@ -9433,11 +10793,38 @@ function renderPartsCards(parts) {
       stockBadge = `<span class="stock-badge stock-badge-in">${p.stock_qty} In Stock</span>`;
     }
 
+    let locHtml = '';
+    if (p.locators) {
+      const locs = p.locators.split(',').map(s => s.trim()).filter(Boolean);
+      locHtml = `<div style="display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px;">` +
+        locs.slice(0, 3).map((l, i) => `<span class="locator-pill ${i === 0 ? 'primary' : ''}">📍 ${escapeHtml(l)}</span>`).join('') +
+        (locs.length > 3 ? `<span class="locator-pill">+${locs.length - 3}</span>` : '') +
+        `</div>`;
+    }
+
+    let priceDisp = `₹${Number(p.default_cost || 0).toLocaleString('en-IN')}`;
+    if (p.price_variants && Array.isArray(p.price_variants) && p.price_variants.length > 1) {
+      const prices = p.price_variants.map(v => v.price).filter(pr => pr > 0);
+      if (prices.length > 1) {
+        const minP = Math.min(...prices);
+        const maxP = Math.max(...prices);
+        if (minP !== maxP) {
+          priceDisp = `₹${minP.toLocaleString('en-IN')} – ₹${maxP.toLocaleString('en-IN')}`;
+        }
+      }
+    }
+
+    const batchCount = p.entry_count || (p.price_variants ? p.price_variants.length : 1);
+
     card.innerHTML = `
       <div class="part-card-top">
         <div class="part-card-title-wrap">
           <h4 class="part-card-title">${escapeHtml(p.part_name)}</h4>
-          ${p.part_code ? `<span class="part-card-sku">SKU: ${escapeHtml(p.part_code)}</span>` : '<span style="font-size:10.5px;color:#94a3b8;">No SKU</span>'}
+          <div style="display: flex; align-items: center; gap: 6px; margin-top: 2px;">
+            ${p.part_code ? `<span class="part-card-sku">SKU: ${escapeHtml(p.part_code)}</span>` : '<span style="font-size:10.5px;color:#94a3b8;">No SKU</span>'}
+            ${batchCount > 1 ? `<span class="batch-count-badge" title="${batchCount} physical stock entries">${batchCount} batches</span>` : ''}
+          </div>
+          ${locHtml}
         </div>
         ${stockBadge}
       </div>
@@ -9445,7 +10832,7 @@ function renderPartsCards(parts) {
       <div class="part-card-metrics">
         <div>
           <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Unit Cost</div>
-          <div class="part-card-cost">₹${Number(p.default_cost || 0).toLocaleString('en-IN')}</div>
+          <div class="part-card-cost" style="font-size: 13px;">${priceDisp}</div>
         </div>
         <div style="text-align: right;">
           <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Orders</div>
@@ -9462,7 +10849,7 @@ function renderPartsCards(parts) {
         </div>
 
         <div style="display: flex; align-items: center; gap: 4px;">
-          <button type="button" class="btn btn-xs btn-outline btn-open-part-details" data-id="${p.id}" title="View details & ticket consumption">
+          <button type="button" class="btn btn-xs btn-outline btn-open-part-details" data-id="${p.id}" title="View batches & consumption">
             Details
           </button>
           <button type="button" class="btn btn-xs btn-outline btn-edit-part" data-id="${p.id}" title="Edit Part">
@@ -9516,6 +10903,31 @@ function renderPartsCards(parts) {
       if (pId) deletePart(pId, pName);
     });
   });
+
+  if (hasMore) {
+    const loadMoreRow = document.createElement('div');
+    loadMoreRow.className = 'parts-load-more-card';
+    loadMoreRow.style.cssText = 'grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 12px 18px; margin-top: 10px;';
+    loadMoreRow.innerHTML = `
+      <span style="font-size: 12.5px; color: #475569; font-weight: 500;">
+        Showing <strong>${parts.length.toLocaleString()}</strong> of <strong>${totalCount.toLocaleString()}</strong> matching parts
+      </span>
+      <div style="display: flex; gap: 8px;">
+        <button type="button" class="btn btn-sm btn-primary" id="btnLoadMoreParts">Load 100 More</button>
+        <button type="button" class="btn btn-sm btn-outline" id="btnLoadAllParts">Show All (${totalCount.toLocaleString()})</button>
+      </div>
+    `;
+    container.appendChild(loadMoreRow);
+
+    loadMoreRow.querySelector('#btnLoadMoreParts').addEventListener('click', () => {
+      state.partsDisplayLimit = (state.partsDisplayLimit || 100) + 100;
+      renderPartsMasterList(state.lastFilteredParts || state.parts);
+    });
+    loadMoreRow.querySelector('#btnLoadAllParts').addEventListener('click', () => {
+      state.partsDisplayLimit = 999999;
+      renderPartsMasterList(state.lastFilteredParts || state.parts);
+    });
+  }
 }
 
 function renderPartsDetailsTable(parts) {
@@ -9523,7 +10935,32 @@ function renderPartsDetailsTable(parts) {
   if (!tbody) return;
   tbody.innerHTML = '';
 
-  if (!parts || parts.length === 0) {
+  const allParts = Array.isArray(parts) ? parts : [];
+
+  const pagination = renderPaginationControls({
+    infoElId: 'partsTablePaginationInfo',
+    numbersElId: 'partsTablePageNumbers',
+    prevBtnId: 'btnPartsTablePrevPage',
+    nextBtnId: 'btnPartsTableNextPage',
+    sizeSelectId: 'partsTablePageSize',
+    totalItems: allParts.length,
+    currentPage: state.partsTablePage || 1,
+    pageSize: state.partsTablePageSize || '25',
+    itemLabel: 'parts',
+    onPageChange: (newPage) => {
+      state.partsTablePage = newPage;
+      renderPartsDetailsTable(state.lastFilteredParts || state.parts);
+    },
+    onSizeChange: (newSize) => {
+      state.partsTablePageSize = String(newSize);
+      state.partsTablePage = 1;
+      renderPartsDetailsTable(state.lastFilteredParts || state.parts);
+    }
+  });
+
+  const pagedParts = pagination.pagedItems(allParts);
+
+  if (!pagedParts || pagedParts.length === 0) {
     tbody.innerHTML = `
       <tr>
         <td colspan="8" style="text-align: center; color: var(--text-subtle); padding: 36px;">
@@ -9534,7 +10971,7 @@ function renderPartsDetailsTable(parts) {
     return;
   }
 
-  parts.forEach(p => {
+  pagedParts.forEach(p => {
     const tr = document.createElement('tr');
     tr.dataset.id = p.id;
     if (p.id === state.selectedPartId) tr.classList.add('active');
@@ -9548,31 +10985,49 @@ function renderPartsDetailsTable(parts) {
       stockBadge = `<span class="stock-badge stock-badge-in" style="font-size: 10px; padding: 1px 6px;">${p.stock_qty} in hand</span>`;
     }
 
-    const assetValue = (p.stock_qty || 0) * (p.default_cost || 0);
+    let locHtml = '<span style="color:#94a3b8; font-size:11px;">—</span>';
+    if (p.locators) {
+      const locs = p.locators.split(',').map(s => s.trim()).filter(Boolean);
+      locHtml = locs.map((l, i) => `<span class="locator-pill ${i === 0 ? 'primary' : ''}">📍 ${escapeHtml(l)}</span>`).join(' ');
+    }
+
+    let priceDisp = `₹${Number(p.default_cost || 0).toLocaleString('en-IN')}`;
+    if (p.price_variants && Array.isArray(p.price_variants) && p.price_variants.length > 1) {
+      const prices = p.price_variants.map(v => v.price).filter(pr => pr > 0);
+      if (prices.length > 1) {
+        const minP = Math.min(...prices);
+        const maxP = Math.max(...prices);
+        if (minP !== maxP) {
+          priceDisp = `₹${minP.toLocaleString('en-IN')} – ₹${maxP.toLocaleString('en-IN')}`;
+        }
+      }
+    }
+
+    const batchCount = p.entry_count || (p.price_variants ? p.price_variants.length : 1);
 
     tr.innerHTML = `
-      <td style="font-family: var(--font-mono); font-size: 11px; color: #475569;">
+      <td style="font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: #0f172a;">
         ${escapeHtml(p.part_code || '—')}
       </td>
       <td>
-        <div style="font-weight: 700; color: #0f172a;">${escapeHtml(p.part_name)}</div>
+        <div style="font-weight: 600; color: #0f172a; font-size: 12px;">${escapeHtml(p.part_name)}</div>
+      </td>
+      <td>
+        <div style="display: flex; gap: 3px; flex-wrap: wrap; max-width: 220px;">
+          ${locHtml}
+        </div>
       </td>
       <td>${stockBadge}</td>
-      <td style="font-family: var(--font-mono); font-weight: 600;">
-        ₹${Number(p.default_cost || 0).toLocaleString('en-IN')}
+      <td style="font-family: var(--font-mono); font-weight: 600; font-size: 12px;">
+        ${priceDisp}
+      </td>
+      <td style="text-align: center;">
+        <button type="button" class="batch-count-badge btn-open-part-details" data-id="${p.id}" title="Click to view batches breakdown">
+          ${batchCount} ${batchCount === 1 ? 'batch' : 'batches'}
+        </button>
       </td>
       <td style="font-family: var(--font-mono); text-align: center; color: #64748b;">
         ${p.total_ordered || 0}
-      </td>
-      <td style="font-family: var(--font-mono); font-weight: 700; color: #0f172a;">
-        ₹${Number(assetValue).toLocaleString('en-IN')}
-      </td>
-      <td style="text-align: center;">
-        <div style="display: inline-flex; align-items: center; gap: 3px;">
-          <button type="button" class="btn-stepper btn-quick-stock" data-id="${p.id}" data-delta="-1" title="Decrement Stock" ${p.stock_qty <= 0 ? 'disabled' : ''}>-</button>
-          <span style="font-family: var(--font-mono); font-size: 11px; font-weight: 700; min-width: 18px; text-align: center;">${p.stock_qty}</span>
-          <button type="button" class="btn-stepper btn-quick-stock" data-id="${p.id}" data-delta="1" title="Increment Stock">+</button>
-        </div>
       </td>
       <td style="text-align: right; white-space: nowrap;">
         <div style="display: inline-flex; align-items: center; gap: 4px;">
@@ -9633,6 +11088,75 @@ function renderPartsDetailsTable(parts) {
   });
 }
 
+/**
+ * Export filtered parts catalog to CSV
+ */
+function exportPartsToCsv() {
+  const parts = state.lastFilteredParts || state.parts || [];
+  if (parts.length === 0) {
+    showToast('No parts available to export for current filters', 'info');
+    return;
+  }
+
+  const headers = [
+    'Part # / SKU',
+    'Part Description',
+    'Locators / Racks',
+    'Stock Qty',
+    'Stock Status',
+    'Unit Cost (₹)',
+    'Batches Count',
+    'Total Ordered Times',
+    'Pending Ordered'
+  ];
+
+  function escapeCsv(val) {
+    if (val == null) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  }
+
+  const rows = parts.map(p => {
+    let stockStatus = 'In Stock';
+    if (p.stock_qty <= 0) stockStatus = 'Out of Stock';
+    else if (p.stock_qty <= 3) stockStatus = 'Low Stock';
+
+    const batchCount = p.entry_count || (p.price_variants ? p.price_variants.length : 1);
+
+    return [
+      p.part_code || '',
+      p.part_name || '',
+      p.locators || '',
+      p.stock_qty != null ? p.stock_qty : 0,
+      stockStatus,
+      p.default_cost != null ? p.default_cost : 0,
+      batchCount,
+      p.total_ordered || 0,
+      p.pending_ordered || 0
+    ].map(escapeCsv).join(',');
+  });
+
+  const csvContent = '\uFEFF' + [
+    headers.map(escapeCsv).join(','),
+    ...rows
+  ].join('\r\n');
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  const filterPart = state.partsFilter && state.partsFilter !== 'all' ? `_${state.partsFilter}` : '';
+  a.href = url;
+  a.download = `Honda_Parts_Inventory_${dateStr}${filterPart}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  showToast(`✓ Successfully exported ${parts.length.toLocaleString()} parts to CSV`, 'success');
+}
+
 async function selectPart(partId) {
   state.selectedPartId = partId;
 
@@ -9644,18 +11168,47 @@ async function selectPart(partId) {
   });
 }
 
-// Open Part Details Modal (Usage History across Tickets)
+// Open Part Details Modal (Usage History & Physical Stock Batches)
 async function openPartDetailsModal(partId) {
   const modal = document.getElementById('modalPartDetailsCompact');
   if (!modal) return;
 
   const header = document.getElementById('partDetailsCompactHeader');
-  const tbody = document.getElementById('partDetailsConsumptionBody');
+  const tbodyCons = document.getElementById('partDetailsConsumptionBody');
+  const tbodyBatches = document.getElementById('partDetailsBatchesBody');
+  const countBatches = document.getElementById('partStockBatchesCount');
+  const countCons = document.getElementById('partConsumptionCount');
   const actions = document.getElementById('partDetailsCompactActions');
   const title = document.getElementById('partDetailsCompactTitle');
 
+  const tabBatches = document.getElementById('tabPartStockBatches');
+  const tabCons = document.getElementById('tabPartConsumptionHistory');
+  const secBatches = document.getElementById('sectionPartStockBatches');
+  const secCons = document.getElementById('sectionPartConsumptionHistory');
+
+  if (tabBatches && tabCons && secBatches && secCons) {
+    tabBatches.onclick = () => {
+      tabBatches.classList.add('active');
+      tabCons.classList.remove('active');
+      secBatches.style.display = 'block';
+      secCons.style.display = 'none';
+    };
+    tabCons.onclick = () => {
+      tabCons.classList.add('active');
+      tabBatches.classList.remove('active');
+      secCons.style.display = 'block';
+      secBatches.style.display = 'none';
+    };
+    // Default to batches tab
+    tabBatches.classList.add('active');
+    tabCons.classList.remove('active');
+    secBatches.style.display = 'block';
+    secCons.style.display = 'none';
+  }
+
   if (header) header.innerHTML = '<div style="color: #64748b; font-size: 12px;">Loading part specifications...</div>';
-  if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b; padding: 20px;">Loading consumption history...</td></tr>';
+  if (tbodyBatches) tbodyBatches.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b; padding: 20px;">Loading physical stock batches...</td></tr>';
+  if (tbodyCons) tbodyCons.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b; padding: 20px;">Loading consumption history...</td></tr>';
   if (actions) actions.innerHTML = '';
 
   modal.style.display = 'flex';
@@ -9665,7 +11218,7 @@ async function openPartDetailsModal(partId) {
     if (!res.ok) throw new Error('Part not found');
     const part = await res.json();
 
-    if (title) title.textContent = part.part_name || 'Part Details';
+    if (title) title.textContent = `${part.part_name || 'Part'} (${part.part_code || 'No SKU'})`;
 
     let stockBadge = '';
     if (part.stock_qty <= 0) {
@@ -9676,6 +11229,8 @@ async function openPartDetailsModal(partId) {
       stockBadge = `<span class="stock-badge stock-badge-in">${part.stock_qty} In Stock</span>`;
     }
 
+    let locText = part.locators ? `📍 Locators: ${part.locators}` : 'No Locators Assigned';
+
     if (header) {
       header.innerHTML = `
         <div>
@@ -9683,49 +11238,56 @@ async function openPartDetailsModal(partId) {
             <strong style="font-size: 15px; color: #0f172a;">${escapeHtml(part.part_name)}</strong>
             ${stockBadge}
           </div>
-          <div style="display: flex; align-items: center; gap: 12px; margin-top: 4px; font-size: 11.5px; color: #64748b;">
-            <span>SKU: <strong style="font-family: var(--font-mono);">${escapeHtml(part.part_code || '—')}</strong></span>
+          <div style="display: flex; align-items: center; gap: 12px; margin-top: 4px; font-size: 11.5px; color: #64748b; flex-wrap: wrap;">
+            <span>Part #: <strong style="font-family: var(--font-mono); color: #0f172a;">${escapeHtml(part.part_code || '—')}</strong></span>
+            <span>&bull;</span>
+            <span style="color: #0284c7; font-weight: 600;">${escapeHtml(locText)}</span>
             <span>&bull;</span>
             <span>Default Price: <strong style="font-family: var(--font-mono); color: #047857;">₹${Number(part.default_cost || 0).toLocaleString('en-IN')}</strong></span>
             <span>&bull;</span>
-            <span>Current Stock: <strong>${part.stock_qty} units</strong></span>
+            <span>Total Stock: <strong>${part.stock_qty} units</strong></span>
           </div>
         </div>
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="font-size: 11px; color: #64748b;">Quick Restock:</span>
-          <button type="button" class="btn btn-xs btn-outline btn-modal-quick-stock" data-delta="-1" ${part.stock_qty <= 0 ? 'disabled' : ''}>-1</button>
-          <button type="button" class="btn btn-xs btn-outline btn-modal-quick-stock" data-delta="1">+1</button>
-          <button type="button" class="btn btn-xs btn-outline btn-modal-quick-stock" data-delta="5">+5</button>
-        </div>
       `;
-
-      header.querySelectorAll('.btn-modal-quick-stock').forEach(b => {
-        b.addEventListener('click', async () => {
-          const delta = parseInt(b.dataset.delta) || 0;
-          await quickAdjustPartStock(part.id, delta);
-          openPartDetailsModal(part.id);
-        });
-      });
     }
 
-    if (actions) {
-      actions.innerHTML = `
-        <button type="button" class="btn btn-outline btn-compact" id="btnEditFromModal">
-          Edit Part Details
-        </button>
-      `;
-      const btnEditM = document.getElementById('btnEditFromModal');
-      if (btnEditM) {
-        btnEditM.addEventListener('click', () => {
-          modal.style.display = 'none';
-          openEditPartModal(part);
-        });
+    // Populate Batches
+    const batches = part.batches || [];
+    if (countBatches) countBatches.textContent = batches.length;
+    if (tbodyBatches) {
+      if (batches.length > 0) {
+        tbodyBatches.innerHTML = batches.map(b => `
+          <tr>
+            <td style="font-family: var(--font-mono); font-size: 11px; font-weight: 600;">${escapeHtml(b.part_number)}</td>
+            <td style="font-size: 11.5px;">${escapeHtml(b.description || '—')}</td>
+            <td style="text-align: center; font-family: var(--font-mono); font-weight: 700; color: ${b.quantity > 0 ? '#047857' : '#94a3b8'};">${b.quantity}</td>
+            <td style="font-family: var(--font-mono); font-weight: 600;">₹${Number(b.unit_price || 0).toLocaleString('en-IN')}</td>
+            <td><span class="locator-pill primary">📍 ${escapeHtml(b.locator_1 || '—')}</span></td>
+            <td>${b.locator_2 ? `<span class="locator-pill">📍 ${escapeHtml(b.locator_2)}</span>` : '<span style="color:#cbd5e1;">—</span>'}</td>
+            <td style="text-align: center;">
+              <span class="stock-badge ${b.quantity > 0 ? 'stock-badge-in' : 'stock-badge-out'}" style="font-size: 9.5px; padding: 1px 5px;">
+                ${escapeHtml(b.availability || (b.quantity > 0 ? 'In Stock' : '0 Qty'))}
+              </span>
+            </td>
+          </tr>
+        `).join('');
+      } else {
+        tbodyBatches.innerHTML = `
+          <tr>
+            <td colspan="7" style="text-align: center; color: #94a3b8; padding: 24px; font-size: 12px;">
+              No physical stock batches recorded for this part number.
+            </td>
+          </tr>
+        `;
       }
     }
 
-    if (tbody) {
-      if (part.usage_history && part.usage_history.length > 0) {
-        tbody.innerHTML = part.usage_history.map(u => `
+    // Populate Consumption History
+    const usage = part.usage_history || [];
+    if (countCons) countCons.textContent = usage.length;
+    if (tbodyCons) {
+      if (usage.length > 0) {
+        tbodyCons.innerHTML = usage.map(u => `
           <tr>
             <td style="font-weight: 700; font-family: var(--font-mono);">
               <a href="javascript:void(0)" class="btn-jump-ticket" data-id="${u.ticket_id}" style="color: #1d4ed8; text-decoration: none;">
@@ -9733,15 +11295,15 @@ async function openPartDetailsModal(partId) {
               </a>
             </td>
             <td>
-              <div style="font-weight: 600; color: #0f172a;">${escapeHtml(u.customer_name || 'Customer')}</div>
-              <div style="font-size: 10.5px; color: #64748b;">${escapeHtml(u.vehicle_no || u.model || 'Vehicle')}</div>
+              <div style="font-weight: 600; font-size: 12px;">${escapeHtml(u.customer_name || '—')}</div>
+              <div style="font-size: 11px; color: #64748b;">${escapeHtml(u.vehicle_no || '')} ${escapeHtml(u.model || '')}</div>
             </td>
-            <td style="font-family: var(--font-mono); font-weight: 700; text-align: center;">x${u.quantity}</td>
+            <td style="text-align: center; font-family: var(--font-mono); font-weight: 700;">${u.quantity}</td>
             <td style="font-family: var(--font-mono);">₹${Number(u.unit_cost || 0).toLocaleString('en-IN')}</td>
-            <td style="font-family: var(--font-mono); font-weight: 700; color: #0f172a;">₹${Number(u.total_cost || 0).toLocaleString('en-IN')}</td>
+            <td style="font-family: var(--font-mono); font-weight: 700;">₹${Number(u.total_cost || 0).toLocaleString('en-IN')}</td>
             <td>
-              <span class="order-status-badge ${u.part_status === 'ARRIVED' ? 'arrived' : 'ordered'}" style="font-size: 10px; padding: 1px 6px;">
-                ${u.part_status === 'ARRIVED' ? 'Arrived' : 'Ordered'}
+              <span class="stock-badge ${u.part_status === 'ARRIVED' ? 'stock-badge-in' : 'stock-badge-low'}" style="font-size: 10px;">
+                ${escapeHtml(u.part_status || 'ORDERED')}
               </span>
             </td>
             <td style="text-align: right;">
@@ -9752,7 +11314,7 @@ async function openPartDetailsModal(partId) {
           </tr>
         `).join('');
 
-        tbody.querySelectorAll('.btn-jump-ticket').forEach(link => {
+        tbodyCons.querySelectorAll('.btn-jump-ticket').forEach(link => {
           link.addEventListener('click', () => {
             modal.style.display = 'none';
             const tId = parseInt(link.dataset.id);
@@ -9760,7 +11322,7 @@ async function openPartDetailsModal(partId) {
           });
         });
       } else {
-        tbody.innerHTML = `
+        tbodyCons.innerHTML = `
           <tr>
             <td colspan="7" style="text-align: center; color: #94a3b8; padding: 28px; font-size: 12px;">
               This part has not been billed to any service tickets yet.
@@ -9771,6 +11333,163 @@ async function openPartDetailsModal(partId) {
     }
   } catch (err) {
     if (header) header.innerHTML = `<div style="color: #dc2626; font-size: 12px;">Error: ${err.message}</div>`;
+  }
+}
+
+// Daily Physical Stock XLSX Synchronization Modal
+function initStockSyncModal() {
+  const btnOpen = document.getElementById('btnSyncPhysicalStock');
+  const modal = document.getElementById('modalSyncStock');
+  if (!btnOpen || !modal) return;
+
+  const dropzone = document.getElementById('syncStockDropzone');
+  const fileInput = document.getElementById('inputStockFile');
+  const fileLabel = document.getElementById('selectedStockFileName');
+  const btnUpload = document.getElementById('btnUploadStockFile');
+  const progressWrap = document.getElementById('stockSyncProgress');
+  const statusText = document.getElementById('stockSyncStatusText');
+  const resultBox = document.getElementById('stockSyncResultBox');
+
+  let currentFile = null;
+
+  async function loadSummary() {
+    try {
+      const res = await fetch('/api/stock/summary');
+      if (res.ok) {
+        const data = await res.json();
+        const statTotal = document.getElementById('syncStatTotalParts');
+        const statInStock = document.getElementById('syncStatInStockParts');
+        const statPieces = document.getElementById('syncStatTotalPieces');
+        const lastUpdated = document.getElementById('syncLastUpdatedText');
+
+        if (statTotal) statTotal.textContent = Number(data.stats?.total_parts || 0).toLocaleString();
+        if (statInStock) statInStock.textContent = Number(data.stats?.in_stock_parts || 0).toLocaleString();
+        if (statPieces) statPieces.textContent = Number(data.stats?.total_pieces || 0).toLocaleString();
+        if (lastUpdated) {
+          if (data.latestLog) {
+            const d = new Date(data.latestLog.created_at);
+            lastUpdated.textContent = `Last physical stock update: ${d.toLocaleString()} (${data.latestLog.filename || 'uploaded file'})`;
+          } else {
+            lastUpdated.textContent = 'No previous stock sync log recorded.';
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load stock summary:', e);
+    }
+  }
+
+  btnOpen.addEventListener('click', () => {
+    modal.style.display = 'flex';
+    if (progressWrap) progressWrap.style.display = 'none';
+    if (resultBox) resultBox.style.display = 'none';
+    if (fileLabel) fileLabel.style.display = 'none';
+    if (btnUpload) {
+      btnUpload.style.display = 'none';
+      btnUpload.disabled = false;
+    }
+    if (fileInput) fileInput.value = '';
+    currentFile = null;
+    loadSummary();
+  });
+
+  // Dropzone click & drag-drop
+  if (dropzone && fileInput) {
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleSelectedFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files && fileInput.files.length > 0) {
+        handleSelectedFile(fileInput.files[0]);
+      }
+    });
+  }
+
+  function handleSelectedFile(file) {
+    if (!file.name.endsWith('.xlsx')) {
+      showToast('Please select a valid .xlsx Excel workbook', 'warning');
+      return;
+    }
+    currentFile = file;
+    if (fileLabel) {
+      fileLabel.textContent = `📄 Selected: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`;
+      fileLabel.style.display = 'inline-block';
+    }
+    if (btnUpload) btnUpload.style.display = 'inline-block';
+  }
+
+  if (btnUpload) {
+    btnUpload.addEventListener('click', async () => {
+      if (!currentFile) return;
+      btnUpload.disabled = true;
+      if (progressWrap) progressWrap.style.display = 'block';
+      if (statusText) statusText.textContent = `Uploading and ingesting ${currentFile.name}...`;
+      if (resultBox) resultBox.style.display = 'none';
+
+      try {
+        const buffer = await currentFile.arrayBuffer();
+        const res = await fetch(`/api/stock/upload-xlsx?filename=${encodeURIComponent(currentFile.name)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: buffer
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Upload failed');
+
+        if (progressWrap) progressWrap.style.display = 'none';
+        if (resultBox) {
+          resultBox.style.display = 'block';
+          const s = data.stats;
+          resultBox.innerHTML = `
+            <div style="font-weight: 700; font-size: 13.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; color: #166534;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>Uploaded Physical Stock Processed!</span>
+            </div>
+            <div class="sync-result-grid">
+              <div class="sync-result-card">
+                <div class="kpi-val">${Number(s.totalRows).toLocaleString()}</div>
+                <div class="kpi-lbl">Total Lines</div>
+              </div>
+              <div class="sync-result-card">
+                <div class="kpi-val">${Number(s.uniqueParts).toLocaleString()}</div>
+                <div class="kpi-lbl">Unique Parts</div>
+              </div>
+              <div class="sync-result-card">
+                <div class="kpi-val">${Number(s.inStockParts).toLocaleString()}</div>
+                <div class="kpi-lbl">In-Stock SKUs</div>
+              </div>
+              <div class="sync-result-card">
+                <div class="kpi-val">${Number(s.totalQuantity).toLocaleString()}</div>
+                <div class="kpi-lbl">Total Pieces</div>
+              </div>
+            </div>
+            <div style="font-size: 11px; color: #475569; margin-top: 8px; text-align: right;">
+              Execution time: ${(s.durationMs / 1000).toFixed(2)}s (${s.syncMode})
+            </div>
+          `;
+        }
+        showToast(`✓ Ingested ${data.stats.totalRows.toLocaleString()} stock entries from ${currentFile.name}`, 'success');
+        loadSummary();
+        await loadAndRenderParts();
+        loadDirectoryCounts();
+      } catch (err) {
+        if (progressWrap) progressWrap.style.display = 'none';
+        showToast('Upload error: ' + err.message, 'error');
+      } finally {
+        btnUpload.disabled = false;
+      }
+    });
   }
 }
 
@@ -9825,26 +11544,48 @@ async function loadAndRenderPartsOrders() {
     state.partsOrders = orders;
 
     let pendingCount = 0;
+    let orderedCount = 0;
     let arrivedCount = 0;
+    let iaCount = 0;
+    let pcaCount = 0;
+    let caCount = 0;
     let totalCost = 0;
 
     orders.forEach(o => {
-      if (o.part_status === 'ARRIVED') arrivedCount++;
+      const isArrived = (o.part_status || '').toUpperCase() === 'ARRIVED';
+      const isOrdered = (o.part_status || '').toUpperCase() === 'ORDERED' && Number(o.current_stage_id) >= 6;
+      const isIa = o.insurance_approved === 1 || o.company_approved === 1;
+      const custStatus = (o.customer_approval_status || '').toUpperCase();
+      const isAfterApproval = Number(o.current_stage_id) > 5;
+
+      if (isArrived) arrivedCount++;
+      else if (isOrdered) orderedCount++;
       else pendingCount++;
+
+      if (isIa) iaCount++;
+      else if (isAfterApproval && custStatus === 'APPROVED') caCount++;
+      else if (isAfterApproval && custStatus === 'PENDING') pcaCount++;
+
       totalCost += (Number(o.total_cost) || 0);
     });
 
-    const kpiTotal = document.getElementById('kpiTotalPartsOrdered');
+    const kpiTotal = document.getElementById('kpiTotalPartsOrdered') || document.getElementById('kpiTotalPartsOrders');
+    const kpiIa = document.getElementById('kpiInsuranceApprovedParts');
+    const kpiPca = document.getElementById('kpiPcaParts');
+    const kpiCa = document.getElementById('kpiCaParts');
     const kpiPending = document.getElementById('kpiPendingPartsOrders');
     const kpiArrived = document.getElementById('kpiArrivedPartsOrders');
     const kpiCost = document.getElementById('kpiTotalProcurementCost');
     const badgePending = document.getElementById('badgePendingOrdersCount');
 
     if (kpiTotal) kpiTotal.textContent = orders.length;
-    if (kpiPending) kpiPending.textContent = pendingCount;
+    if (kpiIa) kpiIa.textContent = iaCount;
+    if (kpiPca) kpiPca.textContent = pcaCount;
+    if (kpiCa) kpiCa.textContent = caCount;
+    if (kpiPending) kpiPending.textContent = orderedCount;
     if (kpiArrived) kpiArrived.textContent = arrivedCount;
     if (kpiCost) kpiCost.textContent = `₹${totalCost.toLocaleString('en-IN')}`;
-    if (badgePending) badgePending.textContent = pendingCount;
+    if (badgePending) badgePending.textContent = orderedCount;
 
     filterPartsOrders();
   } catch (err) {
@@ -9855,14 +11596,30 @@ async function loadAndRenderPartsOrders() {
 function filterPartsOrders() {
   const searchInput = document.getElementById('partsOrdersSearchInput');
   const query = (searchInput ? searchInput.value : '').trim().toLowerCase();
-  const filter = state.partsOrdersFilter || 'all';
+  const filter = (state.partsOrdersFilter || 'all').toUpperCase();
 
   let filtered = state.partsOrders || [];
 
-  if (filter === 'ORDERED') {
-    filtered = filtered.filter(o => o.part_status !== 'ARRIVED');
+  if (filter === 'ORDERED' || filter === 'POD') {
+    filtered = filtered.filter(o => (o.part_status || '').toUpperCase() === 'ORDERED' && Number(o.current_stage_id) >= 6);
   } else if (filter === 'ARRIVED') {
-    filtered = filtered.filter(o => o.part_status === 'ARRIVED');
+    filtered = filtered.filter(o => (o.part_status || '').toUpperCase() === 'ARRIVED');
+  } else if (filter === 'PENDING' || filter === 'PENDING_ORDER') {
+    filtered = filtered.filter(o => (o.part_status || '').toUpperCase() !== 'ARRIVED' && !((o.part_status || '').toUpperCase() === 'ORDERED' && Number(o.current_stage_id) >= 6));
+  } else if (filter === 'PCA') {
+    filtered = filtered.filter(o => {
+      const isAfterApproval = Number(o.current_stage_id) > 5;
+      const isIa = o.insurance_approved === 1 || o.company_approved === 1;
+      const custStatus = (o.customer_approval_status || '').toUpperCase();
+      return isAfterApproval && !isIa && custStatus === 'PENDING';
+    });
+  } else if (filter === 'CA') {
+    filtered = filtered.filter(o => {
+      const isAfterApproval = Number(o.current_stage_id) > 5;
+      return isAfterApproval && (o.customer_approval_status || '').toUpperCase() === 'APPROVED';
+    });
+  } else if (filter === 'IA' || filter === 'INSURANCE_APPROVED') {
+    filtered = filtered.filter(o => o.insurance_approved === 1 || o.company_approved === 1);
   }
 
   if (query) {
@@ -9878,15 +11635,38 @@ function filterPartsOrders() {
   renderPartsOrdersTable(filtered);
 }
 
+function updatePartsBulkToolbar() {
+  const selectedCbs = document.querySelectorAll('#partsOrdersTableBody .part-row-select:checked');
+  const bulkWrap = document.getElementById('partsBulkActionsWrap');
+  const countBadge = document.getElementById('partsSelectedCount');
+  const thSelectAll = document.getElementById('thPartsSelectAll');
+
+  const count = selectedCbs.length;
+  if (countBadge) countBadge.textContent = count;
+
+  if (bulkWrap) {
+    bulkWrap.style.display = count > 0 ? 'inline-flex' : 'none';
+  }
+
+  const allCbs = document.querySelectorAll('#partsOrdersTableBody .part-row-select');
+  if (thSelectAll) {
+    thSelectAll.checked = allCbs.length > 0 && selectedCbs.length === allCbs.length;
+  }
+}
+
 function renderPartsOrdersTable(orders) {
   const tbody = document.getElementById('partsOrdersTableBody');
   if (!tbody) return;
   tbody.innerHTML = '';
 
+  const thSelectAll = document.getElementById('thPartsSelectAll');
+  if (thSelectAll) thSelectAll.checked = false;
+  updatePartsBulkToolbar();
+
   if (!orders || orders.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="9" style="text-align: center; color: var(--text-subtle); padding: 36px;">
+        <td colspan="11" style="text-align: center; color: var(--text-subtle); padding: 36px;">
           No parts orders found matching current filter.
         </td>
       </tr>
@@ -9897,15 +11677,40 @@ function renderPartsOrdersTable(orders) {
   orders.forEach(o => {
     const tr = document.createElement('tr');
 
-    const isArrived = o.part_status === 'ARRIVED';
+    const isArrived = (o.part_status || '').toUpperCase() === 'ARRIVED';
+    const isOrdered = (o.part_status || '').toUpperCase() === 'ORDERED' && Number(o.current_stage_id) >= 6;
+    const isHold = (o.part_status || '').toUpperCase() === 'ON_HOLD';
+    const isIa = o.insurance_approved === 1 || o.company_approved === 1;
+    const custStatus = (o.customer_approval_status || '').toUpperCase();
+    const isOrderAfterApproval = Number(o.current_stage_id) > 5;
+    const isExempt = (o.customer_approval_exempt === 1 || custStatus === 'EXEMPT') && isOrderAfterApproval;
+
+    let approvalBadge = '';
+    if (isIa) {
+      approvalBadge = `<span class="tag-part-lifecycle tag-ia" onclick="openPartsApprovalModal(${o.ticket_id})" title="Insurance Approved">Insurance Approved</span>`;
+    } else if (!isOrderAfterApproval) {
+      approvalBadge = `<span class="tag-part-lifecycle" onclick="openPartsApprovalModal(${o.ticket_id})" style="background:#f8fafc; color:#64748b; border: 1px solid #cbd5e1;" title="Estimate / Awaiting Surveyor Approval">Awaiting Approval</span>`;
+    } else if (custStatus === 'APPROVED') {
+      approvalBadge = `<span class="tag-part-lifecycle tag-ca" onclick="openPartsApprovalModal(${o.ticket_id})" title="Customer Approved">Customer Approved</span>`;
+    } else if (isExempt) {
+      approvalBadge = `<span class="tag-part-lifecycle tag-exempt" onclick="openPartsApprovalModal(${o.ticket_id})" title="Workshop Exemption Active">Exempt</span>`;
+    } else {
+      approvalBadge = `<span class="tag-part-lifecycle tag-pca" onclick="openPartsApprovalModal(${o.ticket_id})" title="Pending Customer Approval">Pending Cust. (PCA)</span>`;
+    }
+
     const statusBadge = isArrived
       ? `<span class="order-status-badge arrived"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 3px;"><polyline points="20 6 9 17 4 12"></polyline></svg>Arrived</span>`
-      : `<span class="order-status-badge ordered"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 3px;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>Awaiting Delivery</span>`;
+      : (isOrdered
+        ? `<span class="order-status-badge ordered"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 3px;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>Awaiting Delivery</span>`
+        : (isHold
+          ? `<span class="order-status-badge on-hold">On Hold</span>`
+          : `<span class="order-status-badge pending"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 3px;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>Pending Order</span>`));
 
     const dateDisplay = isArrived
       ? `<div style="font-size: 11px; color: #047857; font-weight: 600;">Arrived: ${formatDateTime(o.arrived_at)}</div>`
-      : `<div style="font-size: 11px; color: #64748b;">Ordered: ${formatDate(o.created_at)}</div>`;
-
+      : (isOrdered
+        ? `<div style="font-size: 11px; color: #b45309; font-weight: 600;">Ordered: ${formatDate(o.parts_order_date || o.updated_at || o.created_at)}</div>`
+        : `<div style="font-size: 11px; color: #64748b;">Estimated: ${formatDate(o.created_at)}</div>`);
     const actionBtn = isArrived
       ? `<button type="button" class="btn btn-outline btn-xs btn-toggle-order-status" data-id="${o.id}" data-target="ORDERED" title="Revert back to Ordered">
            Mark Pending
@@ -9919,6 +11724,9 @@ function renderPartsOrdersTable(orders) {
       : `<span style="font-size: 10.5px; color: #94a3b8;">${escapeHtml(o.model || 'Honda')}</span>`;
 
     tr.innerHTML = `
+      <td style="text-align: center;">
+        <input type="checkbox" class="part-row-select" data-id="${o.id}">
+      </td>
       <td>
         <div style="font-weight: 700; color: #0f172a;">${escapeHtml(o.part_name)}</div>
         ${o.part_code ? `<div style="font-family: var(--font-mono); font-size: 10.5px; color: #64748b;">SKU: ${escapeHtml(o.part_code)}</div>` : ''}
@@ -9935,10 +11743,14 @@ function renderPartsOrdersTable(orders) {
       <td style="font-family: var(--font-mono); font-weight: 700; text-align: center;">${o.quantity}</td>
       <td style="font-family: var(--font-mono);">₹${Number(o.unit_cost || 0).toLocaleString('en-IN')}</td>
       <td style="font-family: var(--font-mono); font-weight: 700; color: #0f172a;">₹${Number(o.total_cost || 0).toLocaleString('en-IN')}</td>
+      <td>${approvalBadge}</td>
       <td>${statusBadge}</td>
       <td>${dateDisplay}</td>
       <td style="text-align: right; white-space: nowrap;">
         <div style="display: inline-flex; align-items: center; gap: 5px; justify-content: flex-end;">
+          <button type="button" class="btn btn-outline btn-xs" onclick="openPartsApprovalModal(${o.ticket_id})" title="Manage approvals for ticket #${escapeHtml(o.ticket_number)}">
+            Manage
+          </button>
           ${actionBtn}
           <button type="button" class="btn btn-outline-danger btn-xs btn-del-part-order" data-id="${o.id}" data-name="${escapeHtml(o.part_name)}" data-ticket="${escapeHtml(o.ticket_number)}" title="Delete part order item">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -9946,6 +11758,12 @@ function renderPartsOrdersTable(orders) {
         </div>
       </td>
     `;
+
+    // Row selection listener
+    const cb = tr.querySelector('.part-row-select');
+    if (cb) {
+      cb.addEventListener('change', updatePartsBulkToolbar);
+    }
 
     tbody.appendChild(tr);
   });
@@ -9971,6 +11789,49 @@ function renderPartsOrdersTable(orders) {
       if (ticketId) openTicketDetailPage(ticketId);
     });
   });
+}
+
+async function executePartsBulkAction(action) {
+  const selectedCbs = document.querySelectorAll('#partsOrdersTableBody .part-row-select:checked');
+  const partIds = Array.from(selectedCbs).map(cb => Number(cb.dataset.id)).filter(id => id > 0);
+  if (partIds.length === 0) {
+    showToast('No parts selected', 'warning');
+    return;
+  }
+
+  const actionLabels = {
+    CUSTOMER_APPROVE: 'Customer Approve',
+    INSURANCE_APPROVE: 'Insurance Approve',
+    MARK_ARRIVED: 'Mark as Arrived'
+  };
+  const label = actionLabels[action] || action;
+
+  if (!await showConfirmDialog({
+    title: `Bulk ${label}`,
+    message: `Apply "${label}" to ${partIds.length} selected part items?`,
+    confirmText: `Confirm ${label}`
+  })) return;
+
+  try {
+    showGlobalLoader();
+    const res = await fetch('/api/parts-orders/bulk-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ partIds, action })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to execute bulk action');
+    }
+    const data = await res.json();
+    showToast(`✓ Bulk action applied to ${data.count} parts`, 'success');
+    await loadAndRenderPartsOrders();
+    refreshTickets().catch(() => { });
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    hideGlobalLoader();
+  }
 }
 
 async function togglePartOrderStatus(orderId, newStatus) {

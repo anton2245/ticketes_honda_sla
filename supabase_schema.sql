@@ -145,7 +145,8 @@ CREATE TABLE tickets (
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   parts_status_note TEXT,
-  waiting_delivery_date TIMESTAMPTZ
+  waiting_delivery_date TIMESTAMPTZ,
+  customer_approval_exempt INTEGER DEFAULT 0
 );
 
 -- 11. Ticket Stage Logs (stage_logs)
@@ -174,7 +175,11 @@ CREATE TABLE ticket_parts (
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   part_status TEXT DEFAULT 'ORDERED',
   notes TEXT,
-  arrived_at TIMESTAMPTZ
+  arrived_at TIMESTAMPTZ,
+  insurance_approved INTEGER DEFAULT 0,
+  company_approved INTEGER DEFAULT 0,
+  customer_approval_status TEXT DEFAULT 'PENDING',
+  is_critical_to_start INTEGER DEFAULT 0
 );
 
 -- 13. SLA Alerts

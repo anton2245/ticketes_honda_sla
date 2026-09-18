@@ -132,7 +132,7 @@ async function run(sql, params = []) {
 
   let queryText = converted;
   const isInsert = /^\s*insert\s+into\s+([a-zA-Z0-9_"]+)/i.test(queryText);
-  
+
   if (isInsert && !/returning/i.test(queryText)) {
     const match = queryText.match(/^\s*insert\s+into\s+([a-zA-Z0-9_"]+)/i);
     const tableName = match ? match[1].replace(/["']/g, '').toLowerCase() : '';
@@ -222,7 +222,7 @@ async function syncSequences() {
           SELECT setval('${seqName}', COALESCE((SELECT MAX(id) FROM ${table}), 1), true);
         `);
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 }
 
@@ -269,6 +269,46 @@ async function ensureCommentAndNotificationTables() {
 }
 
 /**
+ * Ensure ticket_parts and tickets have customer approval and exemption columns
+ */
+async function ensurePartsApprovalSchema() {
+  try {
+    await executeQuery(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ticket_parts' AND column_name = 'insurance_approved') THEN
+          ALTER TABLE ticket_parts ADD COLUMN insurance_approved INTEGER DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ticket_parts' AND column_name = 'company_approved') THEN
+          ALTER TABLE ticket_parts ADD COLUMN company_approved INTEGER DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ticket_parts' AND column_name = 'customer_approval_status') THEN
+          ALTER TABLE ticket_parts ADD COLUMN customer_approval_status TEXT DEFAULT 'PENDING';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ticket_parts' AND column_name = 'is_critical_to_start') THEN
+          ALTER TABLE ticket_parts ADD COLUMN is_critical_to_start INTEGER DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ticket_parts' AND column_name = 'picked_locators') THEN
+          ALTER TABLE ticket_parts ADD COLUMN picked_locators TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tickets' AND column_name = 'customer_approval_exempt') THEN
+          ALTER TABLE tickets ADD COLUMN customer_approval_exempt INTEGER DEFAULT 0;
+        END IF;
+
+        -- Normalize premature ORDERED status for tickets that have not reached Parts Order (Stage 6)
+        UPDATE ticket_parts
+        SET part_status = 'PENDING_ORDER'
+        WHERE ticket_id IN (SELECT id FROM tickets WHERE current_stage_id < 6)
+          AND (UPPER(COALESCE(part_status, '')) = 'ORDERED' OR part_status IS NULL);
+      END $$;
+    `);
+    console.log('✓ Parts approval & customer exemption schema verified.');
+  } catch (err) {
+    console.warn('Note on ensurePartsApprovalSchema:', err.message);
+  }
+}
+
+/**
  * Initialize database and check essential tables
  */
 async function initDb() {
@@ -278,6 +318,7 @@ async function initDb() {
   }
 
   await ensureCommentAndNotificationTables();
+  await ensurePartsApprovalSchema();
   await ensureRealtimeSetup();
   await syncSequences();
   await seedDefaultAdminIfMissing();
@@ -396,7 +437,7 @@ async function searchCustomers(q) {
     return [];
   }
   const term = `%${q.trim()}%`;
-  
+
   const rows = await all(`
     SELECT DISTINCT
       c.id as customer_id,
@@ -619,15 +660,65 @@ async function getVehicleColors(model = null) {
 
 async function searchParts(q) {
   if (!q || q.trim().length === 0) {
-    return all(`SELECT * FROM parts ORDER BY part_name ASC LIMIT 10;`);
+    return all(`
+      SELECT * FROM parts 
+      ORDER BY CASE WHEN stock_qty > 0 THEN 0 ELSE 1 END, part_code ASC, part_name ASC 
+      LIMIT 30;
+    `);
   }
   const term = `%${q.trim()}%`;
   return all(`
     SELECT * FROM parts 
-    WHERE part_name ILIKE ? OR part_code ILIKE ? 
-    ORDER BY part_name ASC LIMIT 10;
-  `, [term, term]);
+    WHERE part_name ILIKE ? OR part_code ILIKE ? OR COALESCE(locators, '') ILIKE ?
+    ORDER BY CASE WHEN stock_qty > 0 THEN 0 ELSE 1 END, part_code ASC, part_name ASC 
+    LIMIT 30;
+  `, [term, term, term]);
 }
+
+/**
+ * Fetch physical warehouse locators with positive stock (quantity > 0) for a part
+ */
+async function getPartLocators(partCode, partName = '') {
+  let rows = [];
+  const cleanCode = (partCode || '').trim();
+  const cleanName = (partName || '').trim();
+
+  if (cleanCode) {
+    rows = await all(`
+      SELECT id, part_number, description, quantity, unit_price, locator_1, locator_2, availability
+      FROM physical_stock_entries
+      WHERE part_number ILIKE ? AND quantity > 0
+      ORDER BY quantity DESC, unit_price ASC;
+    `, [cleanCode]);
+  }
+  if (rows.length === 0 && cleanName) {
+    rows = await all(`
+      SELECT id, part_number, description, quantity, unit_price, locator_1, locator_2, availability
+      FROM physical_stock_entries
+      WHERE description ILIKE ? AND quantity > 0
+      ORDER BY quantity DESC, unit_price ASC;
+    `, [cleanName]);
+  }
+
+  return rows.map(r => {
+    const locNames = [r.locator_1, r.locator_2]
+      .map(l => (l || '').trim())
+      .filter(l => l && l !== '0' && l !== '-')
+      .join(' / ') || 'Warehouse Floor';
+    return {
+      id: r.id,
+      part_code: r.part_number,
+      description: r.description,
+      locator: locNames,
+      locator_1: r.locator_1,
+      locator_2: r.locator_2,
+      available_qty: Number(r.quantity) || 0,
+      unit_price: Number(r.unit_price) || 0,
+      availability: r.availability || 'On Hand'
+    };
+  });
+}
+
 
 async function searchInsurers(q) {
   if (!q || q.trim().length === 0) {
@@ -771,6 +862,255 @@ async function syncPart(partName, cost) {
 }
 
 /**
+ * Synchronize parts master record stock_qty and locators from physical_stock_entries
+ */
+async function syncPartMasterStock(partCode, partName, fallbackDeductQty = 0) {
+  const cleanCode = (partCode || '').trim();
+  const cleanName = (partName || '').trim();
+
+  if (cleanCode) {
+    const physSummary = await get(`
+      SELECT COALESCE(SUM(quantity), 0) AS total_qty,
+             STRING_AGG(DISTINCT NULLIF(TRIM(locator_1), ''), ', ') AS loc1,
+             STRING_AGG(DISTINCT NULLIF(TRIM(locator_2), ''), ', ') AS loc2,
+             COUNT(*) AS entry_count
+      FROM physical_stock_entries
+      WHERE part_number ILIKE ?;
+    `, [cleanCode]);
+
+    if (physSummary && Number(physSummary.entry_count) > 0) {
+      const totalQty = Math.max(0, Number(physSummary.total_qty) || 0);
+      const allLocs = [physSummary.loc1, physSummary.loc2]
+        .filter(Boolean)
+        .join(', ')
+        .split(',')
+        .map(s => s.trim())
+        .filter((val, idx, self) => val && val !== '0' && val !== '-' && self.indexOf(val) === idx)
+        .join(', ') || null;
+
+      await run(`
+        UPDATE parts
+        SET stock_qty = ?, locators = COALESCE(?, locators)
+        WHERE part_code ILIKE ?;
+      `, [totalQty, allLocs, cleanCode]);
+      return;
+    }
+  }
+
+  // Fallback for non-catalog or description-only parts
+  if (cleanCode) {
+    await run(`
+      UPDATE parts
+      SET stock_qty = GREATEST(0, stock_qty - ?)
+      WHERE part_code ILIKE ?;
+    `, [fallbackDeductQty, cleanCode]);
+  } else if (cleanName) {
+    await run(`
+      UPDATE parts
+      SET stock_qty = GREATEST(0, stock_qty - ?)
+      WHERE part_name ILIKE ?;
+    `, [fallbackDeductQty, cleanName]);
+  }
+}
+
+/**
+ * Deduct part quantity from physical_stock_entries and parts master table
+ * @param {Object} param0
+ * @param {string} param0.partCode
+ * @param {string} param0.partName
+ * @param {number} param0.quantity
+ * @param {Array|string} param0.pickedLocators
+ * @returns {Promise<Array>} Array of allocated picked locators
+ */
+async function deductPartInventory({ partCode, partName, quantity, pickedLocators }) {
+  const reqQty = Math.max(0, Number(quantity) || 0);
+  if (reqQty <= 0) return [];
+
+  const cleanCode = (partCode || '').trim();
+  const cleanName = (partName || '').trim();
+
+  let locList = [];
+  if (Array.isArray(pickedLocators)) {
+    locList = pickedLocators;
+  } else if (typeof pickedLocators === 'string') {
+    try {
+      locList = JSON.parse(pickedLocators);
+    } catch (e) {
+      locList = [];
+    }
+  }
+
+  const allocated = [];
+  let remainingToDeduct = reqQty;
+  const processedEntryIds = new Set();
+
+  // 1. If user explicitly picked specific locators with positive pick_qty
+  if (Array.isArray(locList) && locList.length > 0) {
+    for (const loc of locList) {
+      const pQty = Number(loc.pick_qty || loc.quantity) || 0;
+      const entryId = loc.id;
+      if (entryId && pQty > 0) {
+        const toTake = Math.min(remainingToDeduct, pQty);
+        await run(`
+          UPDATE physical_stock_entries
+          SET quantity = GREATEST(0, quantity - ?)
+          WHERE id = ?;
+        `, [toTake, entryId]);
+
+        processedEntryIds.add(entryId);
+        remainingToDeduct -= toTake;
+        allocated.push({
+          id: entryId,
+          locator: loc.locator || 'Warehouse',
+          locator_1: loc.locator_1 || null,
+          locator_2: loc.locator_2 || null,
+          pick_qty: toTake,
+          unit_price: Number(loc.unit_price) || 0
+        });
+        if (remainingToDeduct <= 0) break;
+      }
+    }
+  }
+
+  // 2. If there is still quantity to deduct (either not picked or partial pick)
+  if (remainingToDeduct > 0) {
+    let availableRows = [];
+    if (cleanCode) {
+      availableRows = await all(`
+        SELECT id, part_number, description, quantity, unit_price, locator_1, locator_2
+        FROM physical_stock_entries
+        WHERE part_number ILIKE ? AND quantity > 0
+        ORDER BY quantity DESC, unit_price ASC;
+      `, [cleanCode]);
+    }
+    if (availableRows.length === 0 && cleanName) {
+      availableRows = await all(`
+        SELECT id, part_number, description, quantity, unit_price, locator_1, locator_2
+        FROM physical_stock_entries
+        WHERE description ILIKE ? AND quantity > 0
+        ORDER BY quantity DESC, unit_price ASC;
+      `, [cleanName]);
+    }
+
+    for (const row of availableRows) {
+      if (processedEntryIds.has(row.id)) continue;
+      const rowQty = Number(row.quantity) || 0;
+      if (rowQty <= 0) continue;
+
+      const take = Math.min(remainingToDeduct, rowQty);
+      await run(`
+        UPDATE physical_stock_entries
+        SET quantity = GREATEST(0, quantity - ?)
+        WHERE id = ?;
+      `, [take, row.id]);
+
+      const locName = [row.locator_1, row.locator_2]
+        .map(l => (l || '').trim())
+        .filter(l => l && l !== '0' && l !== '-')
+        .join(' / ') || 'Warehouse Floor';
+
+      allocated.push({
+        id: row.id,
+        locator: locName,
+        locator_1: row.locator_1,
+        locator_2: row.locator_2,
+        pick_qty: take,
+        unit_price: Number(row.unit_price) || 0
+      });
+
+      remainingToDeduct -= take;
+      if (remainingToDeduct <= 0) break;
+    }
+  }
+
+  // 3. Synchronize master parts table stock_qty
+  await syncPartMasterStock(cleanCode, cleanName, reqQty);
+
+  return allocated;
+}
+
+/**
+ * Restore part quantity back to physical_stock_entries and parts master table
+ * @param {Object} partItem ticket_parts row
+ */
+async function restorePartInventory(partItem) {
+  if (!partItem) return;
+  const qtyToRestore = Math.max(0, Number(partItem.quantity) || 0);
+  if (qtyToRestore <= 0) return;
+
+  const cleanCode = (partItem.part_code || '').trim();
+  const cleanName = (partItem.part_name || '').trim();
+
+  let locList = [];
+  if (Array.isArray(partItem.picked_locators)) {
+    locList = partItem.picked_locators;
+  } else if (typeof partItem.picked_locators === 'string') {
+    try {
+      locList = JSON.parse(partItem.picked_locators);
+    } catch (e) {
+      locList = [];
+    }
+  }
+
+  let remainingToRestore = qtyToRestore;
+
+  // 1. If specific physical_stock_entries were recorded in picked_locators
+  if (Array.isArray(locList) && locList.length > 0) {
+    for (const loc of locList) {
+      const pQty = Number(loc.pick_qty || loc.quantity) || 0;
+      const entryId = loc.id;
+      if (entryId && pQty > 0) {
+        const toAdd = Math.min(remainingToRestore, pQty);
+        await run(`
+          UPDATE physical_stock_entries
+          SET quantity = quantity + ?
+          WHERE id = ?;
+        `, [toAdd, entryId]);
+        remainingToRestore -= toAdd;
+        if (remainingToRestore <= 0) break;
+      }
+    }
+  }
+
+  // 2. If remaining quantity, restore to primary matching physical stock entry
+  if (remainingToRestore > 0) {
+    let targetEntry = null;
+    if (cleanCode) {
+      targetEntry = await get(`
+        SELECT id FROM physical_stock_entries
+        WHERE part_number ILIKE ?
+        ORDER BY quantity DESC, id ASC LIMIT 1;
+      `, [cleanCode]);
+    }
+    if (!targetEntry && cleanName) {
+      targetEntry = await get(`
+        SELECT id FROM physical_stock_entries
+        WHERE description ILIKE ?
+        ORDER BY quantity DESC, id ASC LIMIT 1;
+      `, [cleanName]);
+    }
+
+    if (targetEntry) {
+      await run(`
+        UPDATE physical_stock_entries
+        SET quantity = quantity + ?
+        WHERE id = ?;
+      `, [remainingToRestore, targetEntry.id]);
+    } else {
+      // If no physical stock entry exists, increment parts table directly
+      if (cleanCode) {
+        await run(`UPDATE parts SET stock_qty = stock_qty + ? WHERE part_code ILIKE ?;`, [remainingToRestore, cleanCode]);
+      } else if (cleanName) {
+        await run(`UPDATE parts SET stock_qty = stock_qty + ? WHERE part_name ILIKE ?;`, [remainingToRestore, cleanName]);
+      }
+    }
+  }
+
+  // 3. Synchronize master parts table stock_qty
+  await syncPartMasterStock(cleanCode, cleanName);
+}
+
+/**
  * Get row-by-row parts for a specific ticket
  */
 async function getTicketParts(ticketId) {
@@ -786,6 +1126,19 @@ async function getTicketParts(ticketId) {
 async function saveTicketParts(ticketId, partsArray = []) {
   if (!ticketId) return { totalCost: 0, parts: [], summary: '' };
 
+  const ticket = await get(`SELECT current_stage_id FROM tickets WHERE id = ?;`, [ticketId]);
+  const isStage6OrAbove = ticket ? Number(ticket.current_stage_id) >= 6 : false;
+
+  // Restore inventory for any existing parts on this ticket before replacing
+  const previousParts = await getTicketParts(ticketId);
+  for (const prev of previousParts) {
+    try {
+      await restorePartInventory(prev);
+    } catch (err) {
+      console.error('Error restoring inventory for part prior to update:', err.message);
+    }
+  }
+
   await run(`DELETE FROM ticket_parts WHERE ticket_id = ?;`, [ticketId]);
 
   let calculatedSum = 0;
@@ -800,17 +1153,58 @@ async function saveTicketParts(ticketId, partsArray = []) {
     const pCost = Math.max(0, Number(p.unit_cost || p.cost) || 0);
     const pTotal = Number(p.total_cost || p.total) || (pQty * pCost);
 
-    const pStatus = (p.part_status || p.status || 'ORDERED').trim();
+    // Deduct stock from physical inventory and record allocated locators
+    let allocatedLocators = [];
+    try {
+      allocatedLocators = await deductPartInventory({
+        partCode: pCode,
+        partName: pName,
+        quantity: pQty,
+        pickedLocators: p.picked_locators
+      });
+    } catch (err) {
+      console.error('Error deducting part inventory:', err.message);
+    }
+
+    const pickedLocatorsStr = (allocatedLocators && allocatedLocators.length > 0)
+      ? JSON.stringify(allocatedLocators)
+      : (p.picked_locators ? (typeof p.picked_locators === 'string' ? p.picked_locators : JSON.stringify(p.picked_locators)) : null);
+
+    let rawStatus = (p.part_status || p.status || '').trim().toUpperCase();
+    let pStatus = 'PENDING_ORDER';
+    if (rawStatus === 'ARRIVED') {
+      pStatus = 'ARRIVED';
+    } else if (rawStatus === 'ORDERED' && isStage6OrAbove) {
+      pStatus = 'ORDERED';
+    } else if (rawStatus && rawStatus !== 'ORDERED') {
+      pStatus = rawStatus;
+    } else if (isStage6OrAbove) {
+      pStatus = 'ORDERED';
+    }
     const pNotes = (p.notes || '').trim() || null;
     const pArrivedAt = p.arrived_at || (pStatus === 'ARRIVED' ? new Date().toISOString() : null);
+
+    const insAppr = (p.insurance_approved !== undefined)
+      ? (p.insurance_approved ? 1 : 0)
+      : (p.company_approved !== undefined ? (p.company_approved ? 1 : 0) : 0);
+    const compAppr = insAppr;
+    let custAppr = (p.customer_approval_status || '').trim().toUpperCase();
+    if (!custAppr) {
+      custAppr = insAppr ? 'NONE' : 'PENDING';
+    }
+    const isCrit = p.is_critical_to_start ? 1 : 0;
 
     calculatedSum += pTotal;
     partSummaryNames.push(`${pName} (x${pQty})`);
 
     const res = await run(`
-      INSERT INTO ticket_parts (ticket_id, part_name, part_code, quantity, unit_cost, total_cost, part_status, notes, arrived_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-    `, [ticketId, pName, pCode, pQty, pCost, pTotal, pStatus, pNotes, pArrivedAt]);
+      INSERT INTO ticket_parts (
+        ticket_id, part_name, part_code, quantity, unit_cost, total_cost,
+        part_status, notes, arrived_at, insurance_approved, company_approved,
+        customer_approval_status, is_critical_to_start, picked_locators
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    `, [ticketId, pName, pCode, pQty, pCost, pTotal, pStatus, pNotes, pArrivedAt, insAppr, compAppr, custAppr, isCrit, pickedLocatorsStr]);
 
     savedParts.push({
       id: res.lastID,
@@ -822,10 +1216,15 @@ async function saveTicketParts(ticketId, partsArray = []) {
       total_cost: pTotal,
       part_status: pStatus,
       notes: pNotes,
-      arrived_at: pArrivedAt
+      arrived_at: pArrivedAt,
+      insurance_approved: insAppr,
+      company_approved: compAppr,
+      customer_approval_status: custAppr,
+      is_critical_to_start: isCrit,
+      picked_locators: pickedLocatorsStr
     });
 
-    syncPart(pName, pCost).catch(() => {});
+    syncPart(pName, pCost).catch(() => { });
   }
 
   return {
@@ -845,17 +1244,62 @@ async function addTicketPart(ticketId, partData = {}) {
   const pQty = Math.max(1, Number(partData.quantity || partData.qty) || 1);
   const pCost = Math.max(0, Number(partData.unit_cost || partData.cost) || 0);
   const pTotal = Number(partData.total_cost || partData.total) || (pQty * pCost);
-  const pStatus = ((partData.part_status || partData.status || 'ORDERED') + '').trim().toUpperCase();
+
+  const ticket = await get(`SELECT current_stage_id FROM tickets WHERE id = ?;`, [ticketId]);
+  const isStage6OrAbove = ticket ? Number(ticket.current_stage_id) >= 6 : false;
+
+  let rawStatus = ((partData.part_status || partData.status || '') + '').trim().toUpperCase();
+  let pStatus = 'PENDING_ORDER';
+  if (rawStatus === 'ARRIVED') {
+    pStatus = 'ARRIVED';
+  } else if (rawStatus === 'ORDERED' && isStage6OrAbove) {
+    pStatus = 'ORDERED';
+  } else if (rawStatus && rawStatus !== 'ORDERED') {
+    pStatus = rawStatus;
+  } else if (isStage6OrAbove) {
+    pStatus = 'ORDERED';
+  }
   const pNotes = (partData.notes || '').trim() || null;
   const pArrivedAt = partData.arrived_at || (pStatus === 'ARRIVED' ? new Date().toISOString() : null);
 
+  const insAppr = (partData.insurance_approved !== undefined)
+    ? (partData.insurance_approved ? 1 : 0)
+    : (partData.company_approved !== undefined ? (partData.company_approved ? 1 : 0) : 0);
+  const compAppr = insAppr;
+  let custAppr = (partData.customer_approval_status || '').trim().toUpperCase();
+  if (!custAppr) {
+    custAppr = insAppr ? 'NONE' : 'PENDING';
+  }
+  const isCrit = partData.is_critical_to_start ? 1 : 0;
+
+  // Deduct inventory
+  let allocatedLocators = [];
+  try {
+    allocatedLocators = await deductPartInventory({
+      partCode: pCode,
+      partName: pName,
+      quantity: pQty,
+      pickedLocators: partData.picked_locators
+    });
+  } catch (err) {
+    console.error('Error deducting part inventory on addTicketPart:', err.message);
+  }
+
+  const pickedLocatorsStr = (allocatedLocators && allocatedLocators.length > 0)
+    ? JSON.stringify(allocatedLocators)
+    : (partData.picked_locators ? (typeof partData.picked_locators === 'string' ? partData.picked_locators : JSON.stringify(partData.picked_locators)) : null);
+
   const res = await run(`
-    INSERT INTO ticket_parts (ticket_id, part_name, part_code, quantity, unit_cost, total_cost, part_status, notes, arrived_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-  `, [ticketId, pName, pCode, pQty, pCost, pTotal, pStatus, pNotes, pArrivedAt]);
+    INSERT INTO ticket_parts (
+      ticket_id, part_name, part_code, quantity, unit_cost, total_cost,
+      part_status, notes, arrived_at, insurance_approved, company_approved,
+      customer_approval_status, is_critical_to_start, picked_locators
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  `, [ticketId, pName, pCode, pQty, pCost, pTotal, pStatus, pNotes, pArrivedAt, insAppr, compAppr, custAppr, isCrit, pickedLocatorsStr]);
 
   await refreshTicketPartsSummary(ticketId);
-  syncPart(pName, pCost).catch(() => {});
+  syncPart(pName, pCost).catch(() => { });
 
   return {
     id: res.lastID,
@@ -867,7 +1311,126 @@ async function addTicketPart(ticketId, partData = {}) {
     total_cost: pTotal,
     part_status: pStatus,
     notes: pNotes,
-    arrived_at: pArrivedAt
+    arrived_at: pArrivedAt,
+    insurance_approved: insAppr,
+    company_approved: compAppr,
+    customer_approval_status: custAppr,
+    is_critical_to_start: isCrit,
+    picked_locators: pickedLocatorsStr
+  };
+}
+
+/**
+ * Update approval status for a single ticket part
+ */
+async function updateTicketPartApproval(ticketId, partId, approvalData = {}) {
+  const updates = [];
+  const params = [];
+
+  if (approvalData.insurance_approved !== undefined || approvalData.company_approved !== undefined) {
+    const val = (approvalData.insurance_approved !== undefined)
+      ? (approvalData.insurance_approved ? 1 : 0)
+      : (approvalData.company_approved ? 1 : 0);
+    updates.push('insurance_approved = ?', 'company_approved = ?');
+    params.push(val, val);
+  }
+
+  if (approvalData.customer_approval_status !== undefined) {
+    updates.push('customer_approval_status = ?');
+    params.push(String(approvalData.customer_approval_status).toUpperCase().trim());
+  }
+
+  if (approvalData.is_critical_to_start !== undefined) {
+    updates.push('is_critical_to_start = ?');
+    params.push(approvalData.is_critical_to_start ? 1 : 0);
+  }
+
+  if (approvalData.part_status !== undefined) {
+    updates.push('part_status = ?');
+    params.push(String(approvalData.part_status).toUpperCase().trim());
+  }
+
+  if (approvalData.notes !== undefined) {
+    updates.push('notes = ?');
+    params.push(approvalData.notes);
+  }
+
+  if (updates.length === 0) {
+    return get(`SELECT * FROM ticket_parts WHERE id = ?;`, [partId]);
+  }
+
+  params.push(partId, ticketId);
+  await run(`
+    UPDATE ticket_parts
+    SET ${updates.join(', ')}
+    WHERE id = ? AND ticket_id = ?;
+  `, params);
+
+  return get(`SELECT * FROM ticket_parts WHERE id = ?;`, [partId]);
+}
+
+/**
+ * Bulk update parts approval for a ticket
+ */
+async function bulkUpdateTicketPartsApproval(ticketId, partsList = []) {
+  for (const item of partsList) {
+    if (!item || !item.id) continue;
+    await updateTicketPartApproval(ticketId, item.id, item);
+  }
+  return getTicketParts(ticketId);
+}
+
+/**
+ * Toggle ticket customer approval exemption
+ */
+async function setTicketCustomerApprovalExempt(ticketId, isExempt) {
+  const val = isExempt ? 1 : 0;
+  await run(`UPDATE tickets SET customer_approval_exempt = ? WHERE id = ?;`, [val, ticketId]);
+  return get(`SELECT id, customer_approval_exempt FROM tickets WHERE id = ?;`, [ticketId]);
+}
+
+/**
+ * Compute parts approval and delivery summary statistics for a ticket
+ */
+async function getTicketPartsStats(ticketId) {
+  const ticket = await get(`SELECT current_stage_id FROM tickets WHERE id = ?;`, [ticketId]);
+  const stageId = ticket ? Number(ticket.current_stage_id) || 1 : 1;
+  const isAfterApproval = stageId > 5;
+  const parts = await all(`SELECT * FROM ticket_parts WHERE ticket_id = ?;`, [ticketId]);
+  let insuranceApprovedCount = 0;
+  let pcaCount = 0;
+  let caCount = 0;
+  let podCount = 0;
+  let arrivedCount = 0;
+
+  for (const p of parts) {
+    const isIns = Number(p.insurance_approved || p.company_approved) === 1;
+    if (isIns) insuranceApprovedCount++;
+
+    const custStatus = (p.customer_approval_status || '').toUpperCase();
+    if (isAfterApproval) {
+      if (custStatus === 'PENDING') {
+        pcaCount++;
+      } else if (custStatus === 'APPROVED') {
+        caCount++;
+      }
+    }
+
+    if (p.part_status === 'ARRIVED') {
+      arrivedCount++;
+    } else if (p.part_status === 'ORDERED' && stageId >= 6) {
+      podCount++;
+    }
+  }
+
+  return {
+    totalParts: parts.length,
+    insuranceApprovedCount,
+    pcaCount,
+    caCount,
+    podCount,
+    arrivedCount,
+    isAfterApproval
   };
 }
 
@@ -905,6 +1468,14 @@ async function markAllTicketPartsArrived(ticketId) {
  * Delete a part item from a ticket
  */
 async function deleteTicketPart(ticketId, partId) {
+  const existing = await get(`SELECT * FROM ticket_parts WHERE id = ? AND ticket_id = ?;`, [partId, ticketId]);
+  if (existing) {
+    try {
+      await restorePartInventory(existing);
+    } catch (err) {
+      console.error('Error restoring inventory on deleteTicketPart:', err.message);
+    }
+  }
   await run(`DELETE FROM ticket_parts WHERE id = ? AND ticket_id = ?;`, [partId, ticketId]);
   await refreshTicketPartsSummary(ticketId);
 }
@@ -1219,6 +1790,7 @@ module.exports = {
   searchVehicleModels,
   getVehicleColors,
   searchParts,
+  getPartLocators,
   searchInsurers,
   searchSurveyors,
   syncCustomerAndVehicle,
@@ -1227,7 +1799,14 @@ module.exports = {
   getTicketParts,
   saveTicketParts,
   addTicketPart,
+  deductPartInventory,
+  restorePartInventory,
+  syncPartMasterStock,
   updateTicketPartStatus,
+  updateTicketPartApproval,
+  bulkUpdateTicketPartsApproval,
+  setTicketCustomerApprovalExempt,
+  getTicketPartsStats,
   markAllTicketPartsArrived,
   deleteTicketPart,
   refreshTicketPartsSummary,

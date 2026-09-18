@@ -417,7 +417,8 @@
                       <span class="date-sep">–</span>
                       <input type="date" id="tblDateEnd" class="form-input input-compact" title="End Date">
                     </div>
-                    <button type="button" class="btn-xs btn-outline" id="btnTblDateClear" style="display: none;" title="Reset Date Filter">✕</button>
+                    <button type="button" class="btn-xs btn-outline" id="btnTblDateClear" style="display: none;"
+                      title="Reset Date Filter">✕</button>
                   </div>
                 </div>
 
@@ -450,18 +451,27 @@
               <table class="data-table">
                 <thead>
                   <tr>
-                    <th data-sort-key="ticket_number" class="sortable-th" title="Sort by Ticket #">Ticket # <span class="th-sort-icon"></span></th>
-                    <th data-sort-key="branch_name" class="sortable-th" title="Sort by Branch">Branch <span class="th-sort-icon"></span></th>
-                    <th data-sort-key="customer_name" class="sortable-th" title="Sort by Customer">Customer <span class="th-sort-icon"></span></th>
+                    <th data-sort-key="ticket_number" class="sortable-th" title="Sort by Ticket #">Ticket # <span
+                        class="th-sort-icon"></span></th>
+                    <th data-sort-key="branch_name" class="sortable-th" title="Sort by Branch">Branch <span
+                        class="th-sort-icon"></span></th>
+                    <th data-sort-key="customer_name" class="sortable-th" title="Sort by Customer">Customer <span
+                        class="th-sort-icon"></span></th>
                     <th>Phone</th>
-                    <th data-sort-key="model" class="sortable-th" title="Sort by Vehicle">Vehicle / Reg No <span class="th-sort-icon"></span></th>
+                    <th data-sort-key="model" class="sortable-th" title="Sort by Vehicle">Vehicle / Reg No <span
+                        class="th-sort-icon"></span></th>
                     <th>Chassis</th>
-                    <th data-sort-key="stage" class="sortable-th" title="Sort by Stage">Current Stage <span class="th-sort-icon"></span></th>
-                    <th data-sort-key="status" class="sortable-th" title="Sort by Column">Column <span class="th-sort-icon"></span></th>
-                    <th data-sort-key="entered_date" class="sortable-th" title="Sort by Entered Date">Entered Date <span class="th-sort-icon"></span></th>
-                    <th data-sort-key="aging" class="sortable-th" title="Sort by Aging">Aging <span class="th-sort-icon"></span></th>
+                    <th data-sort-key="stage" class="sortable-th" title="Sort by Stage">Current Stage <span
+                        class="th-sort-icon"></span></th>
+                    <th data-sort-key="status" class="sortable-th" title="Sort by Column">Column <span
+                        class="th-sort-icon"></span></th>
+                    <th data-sort-key="entered_date" class="sortable-th" title="Sort by Entered Date">Entered Date <span
+                        class="th-sort-icon"></span></th>
+                    <th data-sort-key="aging" class="sortable-th" title="Sort by Aging">Aging <span
+                        class="th-sort-icon"></span></th>
                     <th>Max SLA</th>
-                    <th data-sort-key="sla_status" class="sortable-th" title="Sort by SLA Status">SLA Status <span class="th-sort-icon"></span></th>
+                    <th data-sort-key="sla_status" class="sortable-th" title="Sort by SLA Status">SLA Status <span
+                        class="th-sort-icon"></span></th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -986,7 +996,8 @@
                     <div class="tp-composer-toolbar">
                       <div class="tp-composer-helpers">
                         <button type="button" class="btn btn-outline btn-xs" id="btnComposerMention">
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:2px;">
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" style="vertical-align:-1px;margin-right:2px;">
                             <circle cx="12" cy="12" r="4"></circle>
                             <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"></path>
                           </svg>
@@ -1150,7 +1161,16 @@
             <div class="subview-title-wrap">
               <div class="hub-pill-tag tag-parts">Parts & Inventory</div>
             </div>
-            <div class="subview-actions">
+            <div class="subview-actions" style="display: flex; gap: 8px;">
+              <button type="button" class="btn btn-outline btn-sm" id="btnSyncPhysicalStock"
+                title="Daily Physical Stock Upload / Sync (.xlsx)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <span>Update Physical Stock (XLSX)</span>
+              </button>
               <button type="button" class="btn btn-primary btn-sm" id="btnPartsHeaderAction">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -1179,7 +1199,7 @@
                 <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
                 <path d="M9 14l2 2 4-4"></path>
               </svg>
-              <span>Parts Orders & Procurement</span>
+              <span>Parts Orders</span>
               <span class="hub-badge-counter" id="badgePendingOrdersCount" style="margin-left: 6px;">0</span>
             </button>
           </div>
@@ -1201,10 +1221,12 @@
                   <div class="hub-filter-chips" id="partsFilterChips">
                     <button type="button" class="hub-chip active" data-filter="all">All (<span
                         id="partsStatTotal">0</span>)</button>
-                    <button type="button" class="hub-chip" data-filter="in_stock">In Stock</button>
+                    <button type="button" class="hub-chip" data-filter="in_stock">In Stock (<span
+                        id="partsStatInStock">0</span>)</button>
                     <button type="button" class="hub-chip" data-filter="low_stock">Low Stock (<span
                         id="partsStatLow">0</span>)</button>
-                    <button type="button" class="hub-chip" data-filter="out_of_stock">Out of Stock</button>
+                    <button type="button" class="hub-chip" data-filter="out_of_stock">Out of Stock (<span
+                        id="partsStatOut">0</span>)</button>
                   </div>
                 </div>
 
@@ -1243,23 +1265,56 @@
 
               <!-- VIEW 2: High-Density Compact Details Table -->
               <div id="partsTableContainer" class="parts-table-view-wrap" style="display: none;">
+                <div class="parts-table-header-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 4px 2px;">
+                  <div style="font-size: 12.5px; color: #64748b; font-weight: 500;" id="partsTableSubtext">
+                    High-density inventory catalog with warehouse locators and multi-batch stock.
+                  </div>
+                  <button type="button" class="btn btn-xs btn-outline" id="btnExportPartsCsv" title="Export catalog to CSV" style="display: inline-flex; align-items: center; gap: 5px; font-weight: 600; font-size: 11.5px; padding: 3px 8px;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="7 10 12 15 17 10"></polyline>
+                      <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <span>Export CSV</span>
+                  </button>
+                </div>
                 <table class="compact-data-table" id="partsDetailsTable">
                   <thead>
                     <tr>
-                      <th style="width: 140px;">SKU / Code</th>
-                      <th>Part Name / Description</th>
-                      <th style="width: 130px;">Stock Level</th>
-                      <th style="width: 110px;">Unit Cost</th>
-                      <th style="width: 100px; text-align: center;">Orders</th>
-                      <th style="width: 120px;">Asset Value</th>
-                      <th style="width: 90px; text-align: center;">Quick Stock</th>
-                      <th style="width: 140px; text-align: right;">Actions</th>
+                      <th style="width: 140px;">Part # / SKU</th>
+                      <th>Description</th>
+                      <th style="width: 150px;">Rack / Locator</th>
+                      <th style="width: 120px;">Stock Level</th>
+                      <th style="width: 120px;">Unit Cost</th>
+                      <th style="width: 90px; text-align: center;">Batches</th>
+                      <th style="width: 90px; text-align: center;">Orders</th>
+                      <th style="width: 120px; text-align: right;">Actions</th>
                     </tr>
                   </thead>
                   <tbody id="partsDetailsTableBody">
                     <!-- Rendered dynamically by JS -->
                   </tbody>
                 </table>
+
+                <!-- PARTS TABLE PAGINATION FOOTER -->
+                <div class="table-pagination-footer" id="partsTablePaginationFooter" style="margin-top: 12px;">
+                  <div class="tp-pagination-info" id="partsTablePaginationInfo">Showing 0–0 of 0 parts</div>
+                  <div class="tp-pagination-controls">
+                    <div class="tv-tool-item" style="margin-right: 12px; display: inline-flex; align-items: center; gap: 5px;">
+                      <label for="partsTablePageSize" class="tv-label" style="font-size: 11.5px; color: #64748b; margin: 0;">Show:</label>
+                      <select id="partsTablePageSize" class="form-select select-compact"
+                        style="height: 28px; line-height: 26px; padding-top: 0; padding-bottom: 0; font-size: 11.5px;">
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="ALL">All</option>
+                      </select>
+                    </div>
+                    <button type="button" class="btn-page-nav" id="btnPartsTablePrevPage" title="Previous Page">‹ Prev</button>
+                    <div class="tp-page-numbers" id="partsTablePageNumbers"></div>
+                    <button type="button" class="btn-page-nav" id="btnPartsTableNextPage" title="Next Page">Next ›</button>
+                  </div>
+                </div>
               </div>
 
               <!-- Hidden Master List container for backwards-compatibility or selection sync -->
@@ -1279,24 +1334,39 @@
                 </div>
                 <div class="parts-kpi-ribbon-sep"></div>
                 <div class="parts-kpi-ribbon-item">
-                  <span class="kpi-label" style="color: #b45309;">Pending Arrival:</span>
-                  <span class="kpi-val text-amber" id="kpiPendingPartsOrders">0</span>
+                  <span class="kpi-label" style="color: #059669;">Insurance Approved:</span>
+                  <span class="kpi-val text-emerald" id="kpiInsuranceApprovedParts">0</span>
                 </div>
                 <div class="parts-kpi-ribbon-sep"></div>
                 <div class="parts-kpi-ribbon-item">
-                  <span class="kpi-label" style="color: #047857;">Arrived & Installed:</span>
+                  <span class="kpi-label" style="color: #d97706;">Pending Cust. (PCA):</span>
+                  <span class="kpi-val text-amber" id="kpiPcaParts">0</span>
+                </div>
+                <div class="parts-kpi-ribbon-sep"></div>
+                <div class="parts-kpi-ribbon-item">
+                  <span class="kpi-label" style="color: #7c3aed;">Cust. Approved (CA):</span>
+                  <span class="kpi-val" style="color: #7c3aed;" id="kpiCaParts">0</span>
+                </div>
+                <div class="parts-kpi-ribbon-sep"></div>
+                <div class="parts-kpi-ribbon-item">
+                  <span class="kpi-label" style="color: #0284c7;">Awaiting Delivery (POD):</span>
+                  <span class="kpi-val text-cyan" id="kpiPendingPartsOrders">0</span>
+                </div>
+                <div class="parts-kpi-ribbon-sep"></div>
+                <div class="parts-kpi-ribbon-item">
+                  <span class="kpi-label" style="color: #047857;">Arrived:</span>
                   <span class="kpi-val text-emerald" id="kpiArrivedPartsOrders">0</span>
                 </div>
                 <div class="parts-kpi-ribbon-sep"></div>
                 <div class="parts-kpi-ribbon-item">
-                  <span class="kpi-label">Total Procurement Spend:</span>
+                  <span class="kpi-label">Total Spend:</span>
                   <span class="kpi-val text-primary" id="kpiTotalProcurementCost">₹0</span>
                 </div>
               </div>
 
               <!-- Orders Filter & Search Toolbar -->
               <div class="parts-orders-toolbar">
-                <div class="subview-search-box" style="flex: 1; max-width: 380px;">
+                <div class="subview-search-box" style="flex: 1; max-width: 320px;">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="11" cy="11" r="8"></circle>
                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
@@ -1306,8 +1376,39 @@
                 </div>
                 <div class="hub-filter-chips" id="partsOrdersFilterChips">
                   <button type="button" class="hub-chip active" data-filter="all">All Orders</button>
-                  <button type="button" class="hub-chip" data-filter="ORDERED">Awaiting Arrival</button>
+                  <button type="button" class="hub-chip" data-filter="PCA">PCA (Pending Cust.)</button>
+                  <button type="button" class="hub-chip" data-filter="CA">CA (Cust. Approved)</button>
+                  <button type="button" class="hub-chip" data-filter="POD">POD (Awaiting Delivery)</button>
                   <button type="button" class="hub-chip" data-filter="ARRIVED">Arrived</button>
+                  <button type="button" class="hub-chip" data-filter="IA">Insurance Approved</button>
+                </div>
+                <div class="parts-bulk-actions-wrap" id="partsBulkActionsWrap"
+                  style="display: none; align-items: center; gap: 6px; margin-left: auto;">
+                  <span class="selected-count-badge" id="partsSelectedCount">0 selected</span>
+                  <button type="button" class="btn btn-sm btn-outline" id="btnBulkCustomerApprove"
+                    title="Customer Approve Selected">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    Cust. Approve
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline" id="btnBulkInsuranceApprove"
+                    title="Insurance Approve Selected">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                    Insurance Approve
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline" id="btnBulkMarkArrived"
+                    title="Mark Selected as Arrived">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="1" y="3" width="15" height="13"></rect>
+                      <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
+                      <circle cx="5.5" cy="18.5" r="2.5"></circle>
+                      <circle cx="18.5" cy="18.5" r="2.5"></circle>
+                    </svg>
+                    Mark Arrived
+                  </button>
                 </div>
               </div>
 
@@ -1316,12 +1417,15 @@
                 <table class="compact-data-table" id="partsOrdersTable">
                   <thead>
                     <tr>
+                      <th style="width: 32px; text-align: center;"><input type="checkbox" id="thPartsSelectAll"
+                          title="Select All"></th>
                       <th>Part Item</th>
                       <th>Ticket #</th>
                       <th>Vehicle & Customer</th>
                       <th style="text-align: center;">Qty</th>
                       <th>Unit Cost</th>
                       <th>Total</th>
+                      <th>Approval & Coverage</th>
                       <th>Status</th>
                       <th>Order / Arrival Date</th>
                       <th style="text-align: right;">Action</th>
@@ -1837,14 +1941,16 @@
   <div class="modal-overlay" id="modalConfirmDialog" style="display: none; z-index: 99999;">
     <div class="modal modal-sm confirm-modal-card">
       <div class="confirm-modal-icon-wrap" id="confirmModalIconWrap">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
           <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
           <line x1="12" y1="9" x2="12" y2="13"></line>
           <line x1="12" y1="17" x2="12.01" y2="17"></line>
         </svg>
       </div>
       <h3 id="confirmDialogTitle" class="confirm-modal-title">Confirm Action</h3>
-      <p id="confirmDialogMessage" class="confirm-modal-desc">Are you sure you want to proceed? This action cannot be undone.</p>
+      <p id="confirmDialogMessage" class="confirm-modal-desc">Are you sure you want to proceed? This action cannot be
+        undone.</p>
       <div class="confirm-modal-actions">
         <button type="button" class="btn btn-outline btn-compact" id="btnCancelConfirmDialog">Cancel</button>
         <button type="button" class="btn btn-danger btn-compact" id="btnAcceptConfirmDialog">Delete</button>
@@ -1861,7 +1967,8 @@
         <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
           <div>
             <h3>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:6px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                style="vertical-align:-2px;margin-right:6px;">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
                 <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
               </svg>
@@ -1875,7 +1982,8 @@
         <!-- DUAL-SECTION TAB SWITCHER -->
         <div class="modal-tab-nav" id="alertModalTabs">
           <button type="button" class="modal-tab-btn active" data-alert-tab="mentions" id="tabAlertsMentions">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="vertical-align:-2px;margin-right:4px;">
               <circle cx="12" cy="12" r="4"></circle>
               <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"></path>
             </svg>
@@ -1883,7 +1991,8 @@
             <span class="tab-badge" id="countTabMentions">0</span>
           </button>
           <button type="button" class="modal-tab-btn" data-alert-tab="eod" id="tabAlertsEod">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="vertical-align:-2px;margin-right:4px;">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
               <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
             </svg>
@@ -1911,10 +2020,12 @@
         <!-- TAB 2: EOD & SLA ALERTS (TODAY VS ALL-TIME) -->
         <div id="paneAlertsEod" class="alert-tab-pane" style="display: none;">
           <!-- EOD SCOPE TOGGLE -->
-          <div class="eod-scope-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+          <div class="eod-scope-header"
+            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
             <div class="eod-scope-pills" id="eodScopePills">
               <button type="button" class="btn-xs modal-tab-btn active" id="btnEodScopeToday" data-eod-scope="today">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:4px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  style="vertical-align:-1px;margin-right:4px;">
                   <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
                   <line x1="16" y1="2" x2="16" y2="6"></line>
                   <line x1="8" y1="2" x2="8" y2="6"></line>
@@ -1923,10 +2034,12 @@
                 <span>Today's EOD Report</span>
               </button>
               <button type="button" class="btn-xs modal-tab-btn" id="btnEodScopeAllTime" data-eod-scope="all">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:4px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  style="vertical-align:-1px;margin-right:4px;">
                   <circle cx="12" cy="12" r="10"></circle>
                   <line x1="2" y1="12" x2="22" y2="12"></line>
-                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
+                  </path>
                 </svg>
                 <span>All-Time SLA Breaches</span>
               </button>
@@ -2002,7 +2115,8 @@
       </div>
 
       <div class="drawer-tabs">
-        <button type="button" class="drawer-tab-btn active" data-drawer-tab="timeline" id="tabDrawerTimeline">Stage Timeline</button>
+        <button type="button" class="drawer-tab-btn active" data-drawer-tab="timeline" id="tabDrawerTimeline">Stage
+          Timeline</button>
         <button type="button" class="drawer-tab-btn" data-drawer-tab="notes" id="tabDrawerNotes">
           Notes & Comments (<span id="drawerNotesCount">0</span>)
         </button>
@@ -2014,7 +2128,8 @@
         </div>
         <div class="drawer-notes-container" id="drawerNotesPane" style="display: none;">
           <div class="drawer-comment-composer">
-            <textarea id="inputDrawerComment" class="form-textarea" rows="2" placeholder="Write a note or mention (@staff)..."></textarea>
+            <textarea id="inputDrawerComment" class="form-textarea" rows="2"
+              placeholder="Write a note or mention (@staff)..."></textarea>
             <div style="display: flex; justify-content: flex-end; margin-top: 6px;">
               <button type="button" class="btn btn-primary btn-xs" id="btnSubmitDrawerComment">Post Note</button>
             </div>
@@ -3056,11 +3171,42 @@
           style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
           <!-- Populated by JS -->
         </div>
-        <div
-          style="font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 8px;">
-          Service Ticket Consumption History
+
+        <!-- Sub-tabs for Batches vs Ticket Consumption -->
+        <div class="part-details-tabs"
+          style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">
+          <button type="button" class="hub-chip active" id="tabPartStockBatches" style="cursor: pointer;">
+            Physical Stock Batches (<span id="partStockBatchesCount">0</span>)
+          </button>
+          <button type="button" class="hub-chip" id="tabPartConsumptionHistory" style="cursor: pointer;">
+            Service Ticket Consumption (<span id="partConsumptionCount">0</span>)
+          </button>
         </div>
-        <div style="max-height: 380px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px;">
+
+        <!-- Section 1: Physical Stock Batches (Locators & Prices) -->
+        <div id="sectionPartStockBatches"
+          style="max-height: 360px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px;">
+          <table class="compact-data-table" id="partDetailsBatchesTable">
+            <thead>
+              <tr>
+                <th style="width: 130px;">Part Number</th>
+                <th>Batch Description</th>
+                <th style="width: 60px; text-align: center;">Qty</th>
+                <th style="width: 110px;">Unit Price</th>
+                <th style="width: 120px;">Locator 1</th>
+                <th style="width: 120px;">Locator 2</th>
+                <th style="width: 80px; text-align: center;">Status</th>
+              </tr>
+            </thead>
+            <tbody id="partDetailsBatchesBody">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Section 2: Ticket Consumption History -->
+        <div id="sectionPartConsumptionHistory"
+          style="display: none; max-height: 360px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px;">
           <table class="compact-data-table" id="partDetailsConsumptionTable">
             <thead>
               <tr>
@@ -3087,6 +3233,69 @@
       </div>
     </div>
   </div>
+
+  <!-- ==================================================== -->
+  <!-- MODAL: DAILY PHYSICAL STOCK UPDATE (.XLSX)            -->
+  <!-- ==================================================== -->
+  <div class="modal-overlay" id="modalSyncStock" style="display: none;">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <div>
+          <h3>Update Physical Stock (XLSX)</h3>
+          <p class="modal-sub">Upload daily physical inventory spreadsheet (.xlsx) to update stock.</p>
+        </div>
+        <button class="modal-close" data-close="modalSyncStock">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Sync Overview / Status Box -->
+        <div class="sync-summary-banner" id="syncSummaryBanner">
+          <div class="sync-banner-row">
+            <span class="sync-banner-label">Current Master Catalog:</span>
+            <strong id="syncStatTotalParts">—</strong> parts (<strong id="syncStatInStockParts">—</strong> in stock,
+            <strong id="syncStatTotalPieces">—</strong> total pcs)
+          </div>
+          <div class="sync-banner-sub" id="syncLastUpdatedText">Last updated: Checking...</div>
+        </div>
+
+        <!-- Upload Daily XLSX file Dropzone -->
+        <div class="sync-dropzone" id="syncStockDropzone">
+          <input type="file" id="inputStockFile"
+            accept=".xlsx, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display: none;">
+          <div class="dropzone-content">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              class="dropzone-icon">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <div class="dropzone-text">
+              <strong>Click to choose file</strong> or drag and drop .xlsx file here
+            </div>
+            <div class="dropzone-sub">Upload daily physical stock file (.xlsx) with Availability, Part #, Qty,
+              Description, Price & Locators</div>
+          </div>
+          <div id="selectedStockFileName" class="selected-file-label" style="display: none;"></div>
+        </div>
+
+        <!-- Live Progress / Output Display -->
+        <div id="stockSyncProgress" style="display: none; margin-top: 14px;">
+          <div class="sync-progress-bar-wrap">
+            <div class="sync-progress-bar indeterminate"></div>
+          </div>
+          <div class="sync-progress-status" id="stockSyncStatusText">Processing spreadsheet rows...</div>
+        </div>
+
+        <div id="stockSyncResultBox" class="sync-result-box" style="display: none; margin-top: 14px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" data-close="modalSyncStock">Close</button>
+        <button type="button" class="btn btn-primary" id="btnUploadStockFile" style="display: none;">
+          <span>Start Stock Import</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
 
 
   <!-- ==================================================== -->
@@ -3473,6 +3682,140 @@
           <button type="submit" class="btn btn-primary" id="btnSubmitChangePassword">Save New Password</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- PARTS APPROVAL & PROCUREMENT MODAL -->
+  <div id="modalPartsApproval" class="modal-overlay" style="display: none;">
+    <div class="modal modal-lg" style="max-width: 960px; width: 95%;">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon-badge" style="background: #ecfdf5; color: #059669;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              <polyline points="9 12 11 14 15 10"></polyline>
+            </svg>
+          </div>
+          <div>
+            <h3 id="paModalTitle">Parts Approval & Procurement Manager</h3>
+            <p class="modal-sub" id="paModalSubtitle">Manage insurance coverage, customer approval, and procurement
+              progress</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close" id="btnClosePartsApproval">&times;</button>
+      </div>
+
+      <div class="modal-body" style="padding: 18px 24px; max-height: 75vh; overflow-y: auto;">
+        <!-- Metric Summary Chips -->
+        <div class="pa-stats-ribbon" id="paStatsRibbon">
+          <div class="pa-stat-chip"><span class="label">Total Parts:</span> <span class="val" id="paStatTotal">0</span>
+          </div>
+          <div class="pa-stat-chip ia"><span class="label">Insurance Approved:</span> <span class="val"
+              id="paStatIa">0</span></div>
+          <div class="pa-stat-chip pca"><span class="label">Pending Cust. (PCA):</span> <span class="val"
+              id="paStatPca">0</span></div>
+          <div class="pa-stat-chip ca"><span class="label">Cust. Approved (CA):</span> <span class="val"
+              id="paStatCa">0</span></div>
+          <div class="pa-stat-chip pod"><span class="label">Awaiting Delivery (POD):</span> <span class="val"
+              id="paStatPod">0</span></div>
+          <div class="pa-stat-chip arrived"><span class="label">Arrived:</span> <span class="val"
+              id="paStatArrived">0</span></div>
+        </div>
+
+        <!-- Exemption Banner / Toggle -->
+        <div class="pa-exemption-card">
+          <label class="pa-checkbox-label">
+            <input type="checkbox" id="paExemptCheckbox">
+            <span class="pa-checkbox-custom"></span>
+            <div class="pa-exemption-info">
+              <span class="title">Workshop Exemption (Order & Start Work without Customer Pre-Approval)</span>
+              <span class="desc">Enable to proceed with parts ordering and workshop repairs without waiting for customer
+                sign-off. Customer approvals can be gathered later.</span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Parts Table -->
+        <div class="pa-table-wrapper"
+          style="margin-top: 14px; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+          <table class="compact-data-table" style="width: 100%;">
+            <thead style="background: var(--bg-surface-alt, #f8fafc);">
+              <tr>
+                <th style="min-width: 180px;">Part Item & Code</th>
+                <th style="text-align: center; width: 60px;">Qty</th>
+                <th style="width: 90px;">Cost (₹)</th>
+                <th style="text-align: center; min-width: 130px;" title="Approved by Insurance Company">Insurance
+                  Approved</th>
+                <th style="min-width: 140px;" title="Customer Approval Status for Out-of-Pocket Parts">Customer Approval
+                </th>
+                <th style="text-align: center; width: 100px;" title="Is this part critical to begin repair work?">
+                  Critical to Start</th>
+                <th style="text-align: center; width: 90px;">Delivery</th>
+                <th style="text-align: right; width: 45px;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="paPartsTableBody">
+              <!-- Rendered dynamically by JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Inline Add Part Section -->
+        <div class="pa-add-section"
+          style="margin-top: 16px; padding: 12px 14px; background: var(--bg-surface-alt, #f8fafc); border: 1px dashed var(--border-color); border-radius: 8px;">
+          <div
+            style="font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="16"></line>
+              <line x1="8" y1="12" x2="16" y2="12"></line>
+            </svg>
+            <span>Add Additional Part Item</span>
+          </div>
+          <div
+            style="display: grid; grid-template-columns: 2fr 1fr 70px 100px auto auto; gap: 8px; align-items: center;">
+            <div style="position: relative;">
+              <div class="part-row-input-wrap">
+                <input type="text" id="paNewPartName" class="form-input form-input-sm"
+                  placeholder="Search catalog part or SKU..." autocomplete="off">
+                <span id="paNewPartStockInfo" class="part-row-db-action"></span>
+              </div>
+              <div class="suggestions-box part-sugg-dropdown" id="paNewPartSuggestions"
+                style="display: none; position: absolute; left: 0; right: 0; top: 100%; z-index: 1000;"></div>
+            </div>
+            <input type="text" id="paNewPartCode" class="form-input form-input-sm font-mono"
+              placeholder="Part code / SKU" readonly>
+            <input type="number" id="paNewPartQty" class="form-input form-input-sm" placeholder="Qty" value="1" min="1"
+              style="text-align: center;">
+            <input type="number" id="paNewPartCost" class="form-input form-input-sm font-mono" placeholder="Cost (₹)"
+              value="0" min="0">
+            <label
+              style="display: flex; align-items: center; gap: 5px; font-size: 11px; white-space: nowrap; cursor: pointer; user-select: none;">
+              <input type="checkbox" id="paNewPartInsuranceApproved">
+              <span>Insurance Approved</span>
+            </label>
+            <button type="button" class="btn btn-sm btn-outline" id="btnPaAddPartItem" style="white-space: nowrap;">
+              + Add
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <button type="button" class="btn btn-outline btn-compact" id="btnPaBulkCustomerApprove"
+            title="Mark all pending customer parts as Approved">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <span>Customer Approve All (PCA → CA)</span>
+          </button>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn btn-outline" id="btnCancelPartsApproval">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnSavePartsApproval">Save Changes</button>
+        </div>
+      </div>
     </div>
   </div>
 
