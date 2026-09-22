@@ -25,6 +25,7 @@ const db = require('./db');
 const slaEngine = require('./slaEngine');
 const alertService = require('./alertService');
 const stockSync = require('./stockSync');
+const masterImport = require('./masterImport');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,8 +43,59 @@ app.use('/api/stock/upload-xlsx', express.raw({
   limit: '60mb'
 }));
 
+// Raw binary body parser for CSV master import
+app.use('/api/master/import-csv', express.raw({
+  type: ['application/octet-stream', 'text/csv', '*/*'],
+  limit: '60mb'
+}));
+
 app.use(express.json({ limit: '60mb' }));
+
+// Serve Vite + React compiled client if present, falling back to public
+const clientDistPath = path.join(__dirname, '..', 'client', 'dist');
+if (fs.existsSync(clientDistPath)) {
+  app.use(express.static(clientDistPath));
+}
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// ==========================================
+// REAL-TIME SERVER-SENT EVENTS (SSE) BUS
+// ==========================================
+const sseClients = new Set();
+
+function broadcastEvent(type, data = {}) {
+  const payload = `data: ${JSON.stringify({ type, data, timestamp: Date.now() })}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.res.write(payload);
+    } catch (e) {
+      sseClients.delete(client);
+    }
+  }
+}
+
+app.get('/api/events', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  res.write(`data: ${JSON.stringify({ type: 'CONNECTED', timestamp: Date.now() })}\n\n`);
+
+  const client = { id: Date.now(), res };
+  sseClients.add(client);
+
+  req.on('close', () => {
+    sseClients.delete(client);
+  });
+});
+
+// Lightweight health check endpoint for connection monitoring
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: Date.now() });
+});
+
 
 // Serve Supabase JS client for browser / Electron
 app.get('/js/vendor/supabase.js', (req, res) => {
@@ -63,15 +115,32 @@ app.get('/api/config/supabase-client', (req, res) => {
   });
 });
 
-// Initialize database schema, seeds, and physical stock model on startup
 db.initDb().then(async () => {
   console.log('✓ Supabase PostgreSQL database initialized successfully.');
   try {
     const pool = await db.getPool();
     await stockSync.ensureStockSchema(pool);
     console.log('✓ Physical stock schema and indexes verified.');
+
+    // Ensure parts_master schema
+    await masterImport.ensurePartsMasterSchema(pool);
+
+    // Auto-import master CSV if parts_master is empty (one-time seed)
+    const masterCount = await pool.query(`SELECT COUNT(*) as count FROM parts_master;`);
+    if (parseInt(masterCount.rows[0]?.count || '0', 10) === 0) {
+      const csvPath = path.join(__dirname, '..', 'inventorymaster.csv');
+      if (fs.existsSync(csvPath)) {
+        console.log('ℹ parts_master is empty — auto-importing from inventorymaster.csv...');
+        const result = await masterImport.importMasterCsv(pool, csvPath);
+        console.log(`✓ Auto-imported ${result.upsertedCount} master parts in ${result.durationMs}ms.`);
+      } else {
+        console.log('ℹ No inventorymaster.csv found for auto-import. Use POST /api/master/import-csv to import manually.');
+      }
+    } else {
+      console.log(`✓ parts_master already populated (${masterCount.rows[0].count} items).`);
+    }
   } catch (err) {
-    console.error('Physical stock schema initialization warning:', err.message);
+    console.error('Startup schema/import warning:', err.message);
   }
 }).catch(err => {
   console.error('Failed to initialize database:', err);
@@ -530,20 +599,35 @@ app.get('/api/tickets', optionalAuthenticate, async (req, res) => {
     let query = `
       SELECT t.*,
         COALESCE(tp_stats.total_parts, 0) AS total_parts_count,
+        COALESCE(tp_stats.total_parts_qty, 0) AS total_parts_qty,
         COALESCE(tp_stats.insurance_approved_count, 0) AS insurance_approved_count,
-        CASE WHEN t.current_stage_id > 5 THEN COALESCE(tp_stats.pca_count, 0) ELSE 0 END AS pca_count,
-        CASE WHEN t.current_stage_id > 5 THEN COALESCE(tp_stats.ca_count, 0) ELSE 0 END AS ca_count,
+        COALESCE(tp_stats.insurance_approved_qty, 0) AS insurance_approved_qty,
+        CASE WHEN t.current_stage_id >= 5 THEN COALESCE(tp_stats.pca_count, 0) ELSE 0 END AS pca_count,
+        CASE WHEN t.current_stage_id >= 5 THEN COALESCE(tp_stats.ca_count, 0) ELSE 0 END AS ca_count,
+        CASE WHEN t.current_stage_id >= 5 THEN COALESCE(tp_stats.customer_approved_qty, 0) ELSE 0 END AS ca_qty,
+        CASE WHEN t.current_stage_id >= 5 THEN COALESCE(tp_stats.cust_needed_qty, 0) ELSE 0 END AS cust_needed_qty,
+        CASE WHEN t.current_stage_id >= 5 THEN COALESCE(tp_stats.pca_pending_qty, 0) ELSE 0 END AS pca_pending_qty,
+        CASE WHEN t.current_stage_id >= 5 THEN COALESCE(tp_stats.pending_order_count, 0) ELSE 0 END AS pending_order_count,
         CASE WHEN t.current_stage_id >= 6 THEN COALESCE(tp_stats.pod_count, 0) ELSE 0 END AS pod_count,
-        COALESCE(tp_stats.arrived_count, 0) AS arrived_parts_count
+        COALESCE(tp_stats.arrived_count, 0) AS arrived_parts_count,
+        COALESCE(tp_stats.ordered_parts_count, (COALESCE(tp_stats.pod_count, 0) + COALESCE(tp_stats.arrived_count, 0))) AS ordered_parts_count
       FROM tickets t
       LEFT JOIN (
         SELECT ticket_id,
           COUNT(*) AS total_parts,
+          SUM(COALESCE(quantity, 1)) AS total_parts_qty,
+          SUM(COALESCE(insurance_approved_qty, 0)) AS insurance_approved_qty,
+          SUM(COALESCE(customer_approved_qty, 0)) AS customer_approved_qty,
+          SUM(CASE WHEN COALESCE(quantity, 1) > COALESCE(insurance_approved_qty, 0) THEN COALESCE(quantity, 1) - COALESCE(insurance_approved_qty, 0) ELSE 0 END) AS cust_needed_qty,
+          SUM(CASE WHEN COALESCE(quantity, 1) > COALESCE(insurance_approved_qty, 0) + COALESCE(customer_approved_qty, 0) THEN COALESCE(quantity, 1) - COALESCE(insurance_approved_qty, 0) - COALESCE(customer_approved_qty, 0) ELSE 0 END) AS pca_pending_qty,
           SUM(CASE WHEN insurance_approved = 1 OR company_approved = 1 THEN 1 ELSE 0 END) AS insurance_approved_count,
           SUM(CASE WHEN UPPER(COALESCE(customer_approval_status, '')) = 'PENDING' THEN 1 ELSE 0 END) AS pca_count,
           SUM(CASE WHEN UPPER(COALESCE(customer_approval_status, '')) = 'APPROVED' THEN 1 ELSE 0 END) AS ca_count,
           SUM(CASE WHEN UPPER(COALESCE(part_status, '')) = 'ORDERED' THEN 1 ELSE 0 END) AS pod_count,
-          SUM(CASE WHEN UPPER(COALESCE(part_status, '')) = 'ARRIVED' THEN 1 ELSE 0 END) AS arrived_count
+          SUM(CASE WHEN UPPER(COALESCE(part_status, '')) = 'ARRIVED' THEN 1 ELSE 0 END) AS arrived_count,
+          SUM(CASE WHEN UPPER(COALESCE(part_status, '')) IN ('ORDERED', 'ARRIVED') THEN 1 ELSE 0 END) AS ordered_parts_count,
+          SUM(CASE WHEN (insurance_approved = 1 OR company_approved = 1 OR COALESCE(insurance_approved_qty, 0) > 0 OR UPPER(COALESCE(customer_approval_status, '')) = 'APPROVED' OR COALESCE(customer_approved_qty, 0) > 0)
+                    AND UPPER(COALESCE(part_status, '')) NOT IN ('ORDERED', 'ARRIVED') THEN 1 ELSE 0 END) AS pending_order_count
         FROM ticket_parts
         GROUP BY ticket_id
       ) tp_stats ON tp_stats.ticket_id = t.id
@@ -747,20 +831,35 @@ app.get('/api/tickets/:id', optionalAuthenticate, async (req, res) => {
     const ticket = await db.get(`
       SELECT t.*,
         COALESCE(tp_stats.total_parts, 0) AS total_parts_count,
+        COALESCE(tp_stats.total_parts_qty, 0) AS total_parts_qty,
         COALESCE(tp_stats.insurance_approved_count, 0) AS insurance_approved_count,
-        CASE WHEN t.current_stage_id > 5 THEN COALESCE(tp_stats.pca_count, 0) ELSE 0 END AS pca_count,
-        CASE WHEN t.current_stage_id > 5 THEN COALESCE(tp_stats.ca_count, 0) ELSE 0 END AS ca_count,
+        COALESCE(tp_stats.insurance_approved_qty, 0) AS insurance_approved_qty,
+        CASE WHEN t.current_stage_id >= 5 THEN COALESCE(tp_stats.pca_count, 0) ELSE 0 END AS pca_count,
+        CASE WHEN t.current_stage_id >= 5 THEN COALESCE(tp_stats.ca_count, 0) ELSE 0 END AS ca_count,
+        CASE WHEN t.current_stage_id >= 5 THEN COALESCE(tp_stats.customer_approved_qty, 0) ELSE 0 END AS ca_qty,
+        CASE WHEN t.current_stage_id >= 5 THEN COALESCE(tp_stats.cust_needed_qty, 0) ELSE 0 END AS cust_needed_qty,
+        CASE WHEN t.current_stage_id >= 5 THEN COALESCE(tp_stats.pca_pending_qty, 0) ELSE 0 END AS pca_pending_qty,
+        CASE WHEN t.current_stage_id >= 5 THEN COALESCE(tp_stats.pending_order_count, 0) ELSE 0 END AS pending_order_count,
         CASE WHEN t.current_stage_id >= 6 THEN COALESCE(tp_stats.pod_count, 0) ELSE 0 END AS pod_count,
-        COALESCE(tp_stats.arrived_count, 0) AS arrived_parts_count
+        COALESCE(tp_stats.arrived_count, 0) AS arrived_parts_count,
+        COALESCE(tp_stats.ordered_parts_count, (COALESCE(tp_stats.pod_count, 0) + COALESCE(tp_stats.arrived_count, 0))) AS ordered_parts_count
       FROM tickets t
       LEFT JOIN (
         SELECT ticket_id,
           COUNT(*) AS total_parts,
+          SUM(COALESCE(quantity, 1)) AS total_parts_qty,
+          SUM(COALESCE(insurance_approved_qty, 0)) AS insurance_approved_qty,
+          SUM(COALESCE(customer_approved_qty, 0)) AS customer_approved_qty,
+          SUM(CASE WHEN COALESCE(quantity, 1) > COALESCE(insurance_approved_qty, 0) THEN COALESCE(quantity, 1) - COALESCE(insurance_approved_qty, 0) ELSE 0 END) AS cust_needed_qty,
+          SUM(CASE WHEN COALESCE(quantity, 1) > COALESCE(insurance_approved_qty, 0) + COALESCE(customer_approved_qty, 0) THEN COALESCE(quantity, 1) - COALESCE(insurance_approved_qty, 0) - COALESCE(customer_approved_qty, 0) ELSE 0 END) AS pca_pending_qty,
           SUM(CASE WHEN insurance_approved = 1 OR company_approved = 1 THEN 1 ELSE 0 END) AS insurance_approved_count,
           SUM(CASE WHEN UPPER(COALESCE(customer_approval_status, '')) = 'PENDING' THEN 1 ELSE 0 END) AS pca_count,
           SUM(CASE WHEN UPPER(COALESCE(customer_approval_status, '')) = 'APPROVED' THEN 1 ELSE 0 END) AS ca_count,
           SUM(CASE WHEN UPPER(COALESCE(part_status, '')) = 'ORDERED' THEN 1 ELSE 0 END) AS pod_count,
-          SUM(CASE WHEN UPPER(COALESCE(part_status, '')) = 'ARRIVED' THEN 1 ELSE 0 END) AS arrived_count
+          SUM(CASE WHEN UPPER(COALESCE(part_status, '')) = 'ARRIVED' THEN 1 ELSE 0 END) AS arrived_count,
+          SUM(CASE WHEN UPPER(COALESCE(part_status, '')) IN ('ORDERED', 'ARRIVED') THEN 1 ELSE 0 END) AS ordered_parts_count,
+          SUM(CASE WHEN (insurance_approved = 1 OR company_approved = 1 OR COALESCE(insurance_approved_qty, 0) > 0 OR UPPER(COALESCE(customer_approval_status, '')) = 'APPROVED' OR COALESCE(customer_approved_qty, 0) > 0)
+                    AND UPPER(COALESCE(part_status, '')) NOT IN ('ORDERED', 'ARRIVED') THEN 1 ELSE 0 END) AS pending_order_count
         FROM ticket_parts
         GROUP BY ticket_id
       ) tp_stats ON tp_stats.ticket_id = t.id
@@ -829,6 +928,20 @@ app.get('/api/tickets/:id/parts', optionalAuthenticate, async (req, res) => {
 });
 
 /**
+ * Get ticket stage logs (workflow history)
+ */
+app.get('/api/tickets/:id/stage-logs', optionalAuthenticate, async (req, res) => {
+  try {
+    const logs = await db.all(`
+      SELECT * FROM stage_logs WHERE ticket_id = ? ORDER BY entered_at ASC;
+    `, [req.params.id]);
+    res.json(logs || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * Add a part item to ticket
  */
 app.post('/api/tickets/:id/parts/add', optionalAuthenticate, async (req, res) => {
@@ -866,6 +979,113 @@ app.post('/api/tickets/:id/parts/:partId/status', optionalAuthenticate, async (r
 });
 
 /**
+ * Single part purchase order placement (Stage 6)
+ * Mandatory: purchaseId
+ */
+app.post('/api/tickets/:id/parts/:partId/order', optionalAuthenticate, async (req, res) => {
+  try {
+    const ticket = await db.get('SELECT id, current_stage_id FROM tickets WHERE id = ?;', [req.params.id]);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    if (req.user && req.user.role !== 'admin' && !hasStagePermission(req.user, ticket.current_stage_id, 'write')) {
+      return res.status(403).json({ error: `Permission denied: You do not have write permission for Stage ${ticket.current_stage_id}.` });
+    }
+
+    const { orderQty, purchaseId, notes, expectedArrivalDate } = req.body;
+    if (!purchaseId || !String(purchaseId).trim()) {
+      return res.status(400).json({ error: 'Purchase ID is mandatory to place a parts order.' });
+    }
+
+    const updatedPart = await db.orderTicketPart(req.params.id, req.params.partId, {
+      orderQty: Math.max(1, Number(orderQty) || 1),
+      purchaseId: String(purchaseId).trim(),
+      notes,
+      expectedArrivalDate
+    });
+
+    await db.refreshTicketPartsSummary(req.params.id).catch(() => {});
+    const parts = await db.getTicketParts(req.params.id);
+    broadcastEvent('TICKET_PART_ORDERED', { ticketId: Number(req.params.id), part: updatedPart });
+    res.json({ success: true, part: updatedPart, parts });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * Procure ticket part directly from warehouse stock (Stage 6 / Stock Procurement)
+ * Deducts quantity from physical inventory entries and sets part status as ARRIVED from stock
+ */
+app.post('/api/tickets/:id/parts/:partId/procure-stock', optionalAuthenticate, async (req, res) => {
+  try {
+    const ticket = await db.get('SELECT id, current_stage_id FROM tickets WHERE id = ?;', [req.params.id]);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    if (req.user && req.user.role !== 'admin' && !hasStagePermission(req.user, ticket.current_stage_id, 'write')) {
+      return res.status(403).json({ error: `Permission denied: You do not have write permission for Stage ${ticket.current_stage_id}.` });
+    }
+
+    const { quantity, notes } = req.body;
+    const updatedPart = await db.procureTicketPartFromStock(req.params.id, req.params.partId, {
+      quantity,
+      notes
+    });
+
+    await db.refreshTicketPartsSummary(req.params.id).catch(() => {});
+    const parts = await db.getTicketParts(req.params.id);
+    broadcastEvent('TICKET_PART_PROCURED_FROM_STOCK', { ticketId: Number(req.params.id), part: updatedPart });
+    res.json({ success: true, part: updatedPart, parts });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * Bulk parts purchase order placement (Stage 6)
+ * Each order item or masterPurchaseId must provide a valid purchaseId
+ */
+app.post('/api/tickets/:id/parts/bulk-order', optionalAuthenticate, async (req, res) => {
+  try {
+    const ticket = await db.get('SELECT id, current_stage_id FROM tickets WHERE id = ?;', [req.params.id]);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    if (req.user && req.user.role !== 'admin' && !hasStagePermission(req.user, ticket.current_stage_id, 'write')) {
+      return res.status(403).json({ error: `Permission denied: You do not have write permission for Stage ${ticket.current_stage_id}.` });
+    }
+
+    const { orders, masterPurchaseId, expectedArrivalDate, notes } = req.body;
+    if (!Array.isArray(orders) || orders.length === 0) {
+      return res.status(400).json({ error: 'No parts provided for ordering.' });
+    }
+
+    // Validate that every order has a valid purchaseId
+    for (const item of orders) {
+      const pId = item.partId || item.id;
+      const pPurchaseId = (item.purchaseId || masterPurchaseId || '').trim();
+      if (!pPurchaseId) {
+        return res.status(400).json({ error: `Purchase ID is mandatory for part #${pId}.` });
+      }
+    }
+
+    for (const item of orders) {
+      const pId = item.partId || item.id;
+      const pQty = Math.max(1, Number(item.orderQty || item.quantity) || 1);
+      const pPurchaseId = (item.purchaseId || masterPurchaseId || '').trim();
+      await db.orderTicketPart(req.params.id, pId, {
+        orderQty: pQty,
+        purchaseId: pPurchaseId,
+        notes: item.notes || notes,
+        expectedArrivalDate: item.expectedArrivalDate || expectedArrivalDate
+      });
+    }
+
+    await db.refreshTicketPartsSummary(req.params.id).catch(() => {});
+    const parts = await db.getTicketParts(req.params.id);
+    broadcastEvent('TICKET_PARTS_BULK_ORDERED', { ticketId: Number(req.params.id) });
+    res.json({ success: true, parts });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/**
  * Batch mark parts as arrived
  */
 app.post('/api/tickets/:id/parts/batch-arrival', optionalAuthenticate, async (req, res) => {
@@ -875,17 +1095,62 @@ app.post('/api/tickets/:id/parts/batch-arrival', optionalAuthenticate, async (re
     if (req.user && req.user.role !== 'admin' && !hasStagePermission(req.user, ticket.current_stage_id, 'write')) {
       return res.status(403).json({ error: `Permission denied: You do not have write permission for Stage ${ticket.current_stage_id}.` });
     }
-    const { partIds } = req.body;
+    const { partIds, syncAll, notes } = req.body;
     const nowIso = new Date().toISOString();
-    if (Array.isArray(partIds) && partIds.length > 0) {
-      for (const pid of partIds) {
-        await db.updateTicketPartStatus(req.params.id, pid, 'ARRIVED', nowIso);
+    const currentParts = await db.getTicketParts(req.params.id);
+
+    if (Array.isArray(partIds)) {
+      const arrivedSet = new Set(partIds.map(id => Number(id)));
+      for (const p of currentParts) {
+        if (arrivedSet.has(Number(p.id))) {
+          if ((p.part_status || '').toUpperCase() !== 'ARRIVED') {
+            await db.updateTicketPartStatus(req.params.id, p.id, 'ARRIVED', nowIso);
+          }
+        } else if (syncAll) {
+          if ((p.part_status || '').toUpperCase() === 'ARRIVED') {
+            await db.updateTicketPartStatus(req.params.id, p.id, 'ORDERED', null);
+          }
+        }
       }
     } else {
       await db.markAllTicketPartsArrived(req.params.id);
     }
+
+    if (notes && typeof notes === 'string' && notes.trim()) {
+      const user = req.user || { id: null, display_name: 'Parts Dept', username: 'parts', role: 'Staff' };
+      await db.run(`
+        INSERT INTO ticket_comments (ticket_id, parent_id, user_id, user_name, user_role, content, mentions)
+        VALUES (?, NULL, ?, ?, ?, ?, ?);
+      `, [
+        ticket.id,
+        user.id,
+        user.display_name || user.username || 'Parts Department',
+        user.role || 'Staff',
+        `[Parts Arrival Update] ${notes.trim()}`,
+        []
+      ]);
+    }
+
     const parts = await db.getTicketParts(req.params.id);
-    res.json({ success: true, parts });
+    const updatedTicket = await db.get(`
+      SELECT t.*,
+        COALESCE(tp_stats.total_parts, 0) AS total_parts_count,
+        COALESCE(tp_stats.total_parts_qty, 0) AS total_parts_qty,
+        COALESCE(tp_stats.arrived_count, 0) AS arrived_parts_count
+      FROM tickets t
+      LEFT JOIN (
+        SELECT ticket_id,
+          COUNT(*) AS total_parts,
+          SUM(COALESCE(quantity, 1)) AS total_parts_qty,
+          SUM(CASE WHEN UPPER(COALESCE(part_status, '')) = 'ARRIVED' THEN 1 ELSE 0 END) AS arrived_count
+        FROM ticket_parts
+        WHERE ticket_id = ?
+        GROUP BY ticket_id
+      ) tp_stats ON tp_stats.ticket_id = t.id
+      WHERE t.id = ?;
+    `, [req.params.id, req.params.id]);
+
+    res.json({ success: true, parts, ticket: updatedTicket });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -991,6 +1256,120 @@ app.post('/api/tickets/:id/parts-approval/bulk-customer-approve', optionalAuthen
   }
 });
 
+/**
+ * Fulfill Customer Approved (CA) parts: 2-segment split between Take from Stock (ARRIVED) and Purchase (ORDERED)
+ */
+app.post('/api/tickets/:id/ca-fulfill', optionalAuthenticate, async (req, res) => {
+  try {
+    const ticketId = req.params.id;
+    const ticket = await db.get('SELECT id, current_stage_id, ticket_number FROM tickets WHERE id = ?;', [ticketId]);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    if (req.user && req.user.role !== 'admin' && !hasStagePermission(req.user, ticket.current_stage_id, 'write')) {
+      return res.status(403).json({ error: `Permission denied: You do not have write permission for Stage ${ticket.current_stage_id}.` });
+    }
+
+    const { allocations } = req.body;
+    if (!Array.isArray(allocations) || allocations.length === 0) {
+      return res.status(400).json({ error: 'No allocations provided' });
+    }
+
+    const nowIso = new Date().toISOString();
+    let updatedCount = 0;
+    let anyOrdered = false;
+
+    for (const alloc of allocations) {
+      const partId = Number(alloc.partId);
+      const stockQty = Math.max(0, Number(alloc.takeFromStockQty) || 0);
+      const purchaseQty = Math.max(0, Number(alloc.purchaseQty) || 0);
+      const locators = alloc.locators || '';
+
+      if (!partId || (stockQty === 0 && purchaseQty === 0)) continue;
+
+      const origPart = await db.get('SELECT * FROM ticket_parts WHERE id = ? AND ticket_id = ?;', [partId, ticketId]);
+      if (!origPart) continue;
+
+      const unitCost = Number(origPart.unit_cost) || 0;
+
+      if (stockQty > 0 && purchaseQty === 0) {
+        // 100% fulfilled from warehouse stock -> Mark ARRIVED
+        await db.updateTicketPartApproval(ticketId, partId, {
+          quantity: stockQty,
+          customer_approved_qty: stockQty,
+          total_cost: stockQty * unitCost,
+          part_status: 'ARRIVED',
+          arrived_at: nowIso,
+          picked_locators: locators || origPart.picked_locators,
+          notes: (origPart.notes ? `${origPart.notes} | ` : '') + `Fulfilled from stock (${stockQty} pcs)`
+        });
+        updatedCount++;
+      } else if (purchaseQty > 0 && stockQty === 0) {
+        // 100% ordered from supplier -> Mark ORDERED
+        await db.updateTicketPartApproval(ticketId, partId, {
+          quantity: purchaseQty,
+          customer_approved_qty: purchaseQty,
+          total_cost: purchaseQty * unitCost,
+          part_status: 'ORDERED',
+          arrived_at: null,
+          notes: (origPart.notes ? `${origPart.notes} | ` : '') + `Customer purchase order placed (${purchaseQty} pcs)`
+        });
+        updatedCount++;
+        anyOrdered = true;
+      } else if (stockQty > 0 && purchaseQty > 0) {
+        // Split: original row becomes the in-stock fulfilled part (ARRIVED)
+        await db.updateTicketPartApproval(ticketId, partId, {
+          quantity: stockQty,
+          customer_approved_qty: stockQty,
+          total_cost: stockQty * unitCost,
+          part_status: 'ARRIVED',
+          arrived_at: nowIso,
+          picked_locators: locators || origPart.picked_locators,
+          notes: (origPart.notes ? `${origPart.notes} | ` : '') + `Fulfilled from stock (${stockQty} pcs)`
+        });
+
+        // Add a second row for the purchased portion (ORDERED)
+        await db.addTicketPart(ticketId, {
+          part_name: origPart.part_name,
+          part_code: origPart.part_code,
+          quantity: purchaseQty,
+          unit_cost: unitCost,
+          total_cost: purchaseQty * unitCost,
+          customer_approved_qty: purchaseQty,
+          customer_approval_status: 'APPROVED',
+          insurance_approved: 0,
+          insurance_approved_qty: 0,
+          company_approved: 0,
+          part_status: 'ORDERED',
+          arrived_at: null,
+          notes: `Purchase order placed for balance (${purchaseQty} pcs)`,
+          is_critical_to_start: origPart.is_critical_to_start || 0
+        });
+
+        updatedCount += 2;
+        anyOrdered = true;
+      }
+    }
+
+    if (anyOrdered) {
+      await db.run(`UPDATE tickets SET parts_order_date = COALESCE(parts_order_date, ?) WHERE id = ?;`, [nowIso, ticketId]);
+    }
+
+    await db.refreshTicketPartsSummary(ticketId);
+    const updatedParts = await db.getTicketParts(ticketId);
+    const stats = await db.getTicketPartsStats(ticketId);
+    const updatedTicket = await db.get('SELECT * FROM tickets WHERE id = ?;', [ticketId]);
+
+    res.json({
+      success: true,
+      updatedCount,
+      parts: updatedParts,
+      stats,
+      ticket: updatedTicket
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 /**
  * Create new service ticket (Stage 1: Vehicle Arrival)
@@ -1014,17 +1393,17 @@ app.post('/api/tickets', optionalAuthenticate, async (req, res) => {
     if (req.user && req.user.role !== 'admin' && !hasStagePermission(req.user, 1, 'write')) {
       return res.status(403).json({ error: 'Permission denied: You do not have write permission for Stage 1 (Vehicle Arrival).' });
     }
-    const outletId = req.body.branchId || req.body.outletId;
-    const {
-      customerName,
-      customerPhone,
-      vehicleNo,
-      vehicleName,
-      model,
-      color,
-      chassisNumber,
-      arrivalDate
-    } = req.body;
+    const outletId = req.body.branchId || req.body.outletId || req.body.outlet_id;
+    const customerName = req.body.customerName || req.body.customer_name;
+    const customerPhone = req.body.customerPhone || req.body.customer_phone;
+    const vehicleNo = req.body.vehicleNo || req.body.vehicle_no || req.body.vehicle_plate;
+    const model = req.body.model || req.body.vehicle_model || req.body.vehicleModel;
+    const vehicleName = req.body.vehicleName || req.body.vehicle_name || model;
+    const color = req.body.color || req.body.vehicle_color;
+    const chassisNumber = req.body.chassisNumber || req.body.chassis_number || req.body.vin;
+    const insuranceCompany = req.body.insuranceCompany || req.body.insurance_company;
+    const damagedParts = req.body.damagedParts || req.body.damaged_parts;
+    const arrivalDate = req.body.arrivalDate || req.body.arrival_date;
 
     if (!outletId) {
       return res.status(400).json({ error: 'Please select a branch.' });
@@ -1075,8 +1454,12 @@ app.post('/api/tickets', optionalAuthenticate, async (req, res) => {
         db.all(`SELECT ticket_number FROM tickets WHERE ticket_number LIKE ?;`, [`${prefix}%`])
       ]);
 
-      if (!outlet) {
-        throw new Error('Invalid branch selected.');
+      let finalOutlet = outlet;
+      if (!finalOutlet) {
+        finalOutlet = await db.get('SELECT * FROM outlets WHERE is_active = 1 ORDER BY id ASC LIMIT 1;');
+      }
+      if (!finalOutlet) {
+        throw new Error('No active branch/outlet found in the system.');
       }
 
       // Compute monotonic ticket number
@@ -1097,17 +1480,22 @@ app.post('/api/tickets', optionalAuthenticate, async (req, res) => {
         INSERT INTO tickets (
           ticket_number, outlet_id, outlet_name, customer_id, customer_name,
           customer_phone, vehicle_no, vehicle_name, model, color, chassis_number,
+          insurance_company, damaged_parts,
           current_stage_id, status, arrival_date, current_stage_entered_at
         ) VALUES (
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?, ?,
+          ?, ?,
           1, 'OPEN', ?, ?
         );
       `, [
-        ticketNumber, outlet.id, outlet.name, customerId || null, customerName.trim(),
+        ticketNumber, finalOutlet.id, finalOutlet.name, customerId || null, customerName.trim(),
         customerPhone.trim(), vehicleNo ? vehicleNo.trim().toUpperCase() : null,
         resolvedVehicleName, resolvedModel || null, color ? color.trim() : null,
-        (chassisNumber && chassisNumber.trim()) ? chassisNumber.trim().toUpperCase() : '', nowIso, nowIso
+        (chassisNumber && chassisNumber.trim()) ? chassisNumber.trim().toUpperCase() : '',
+        insuranceCompany ? insuranceCompany.trim() : null,
+        damagedParts ? damagedParts.trim() : null,
+        nowIso, nowIso
       ]);
 
       const newTicketId = insertResult.lastID;
@@ -1132,6 +1520,7 @@ app.post('/api/tickets', optionalAuthenticate, async (req, res) => {
       activeTicketCreations.delete(dedupKey);
     }
 
+    broadcastEvent('TICKET_CREATED', { ticket: createdTicket });
     res.status(201).json(createdTicket);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1141,8 +1530,13 @@ app.post('/api/tickets', optionalAuthenticate, async (req, res) => {
 /**
  * Update general ticket fields (re-editable data entry)
  */
-app.put('/api/tickets/:id', async (req, res) => {
+app.put('/api/tickets/:id', optionalAuthenticate, async (req, res) => {
   try {
+    const existingTicket = await db.get('SELECT * FROM tickets WHERE id = ?;', [req.params.id]);
+    if (!existingTicket) {
+      return res.status(404).json({ error: 'Ticket not found.' });
+    }
+
     const {
       customerName,
       customerPhone,
@@ -1158,9 +1552,13 @@ app.put('/api/tickets/:id', async (req, res) => {
       surveyorPhone,
       syncCrm,
       parts,
-      partsStatusNote
+      partsStatusNote,
+      assignedTo,
+      assigned_to,
+      assignmentNote
     } = req.body;
 
+    const resolvedAssignedTo = assignedTo !== undefined ? assignedTo : assigned_to;
     const resolvedModel = model !== undefined ? (model?.trim() || null) : undefined;
     const resolvedVehicleName = vehicleName !== undefined ? (vehicleName?.trim() || null) : resolvedModel;
 
@@ -1177,6 +1575,9 @@ app.put('/api/tickets/:id', async (req, res) => {
       }
     }
 
+    // Determine assignee update
+    const newAssignee = resolvedAssignedTo !== undefined ? (resolvedAssignedTo ? String(resolvedAssignedTo).trim() : null) : existingTicket.assigned_to;
+
     await db.run(`
       UPDATE tickets SET
         customer_name = COALESCE(?, customer_name),
@@ -1192,14 +1593,48 @@ app.put('/api/tickets/:id', async (req, res) => {
         surveyor_name = COALESCE(?, surveyor_name),
         surveyor_phone = COALESCE(?, surveyor_phone),
         parts_status_note = COALESCE(?, parts_status_note),
+        assigned_to = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?;
     `, [
       customerName, customerPhone, vehicleNo, resolvedVehicleName, resolvedModel, color, chassisNumber,
       resolvedEstimatedCost, resolvedDamagedParts, insuranceCompany, surveyorName, surveyorPhone,
       partsStatusNote !== undefined ? partsStatusNote : null,
+      newAssignee,
       req.params.id
     ]);
+
+    // Dispatch assignment notification if assignee changed to a registered user
+    if (resolvedAssignedTo !== undefined && newAssignee && newAssignee !== existingTicket.assigned_to) {
+      try {
+        const targetUser = await db.get(`
+          SELECT id, username, display_name 
+          FROM users 
+          WHERE LOWER(username) = LOWER(?) OR LOWER(display_name) = LOWER(?);
+        `, [newAssignee, newAssignee]);
+
+        const actor = req.user || { id: null, display_name: 'Staff Member', username: 'staff' };
+        const actorId = actor.id || null;
+        const actorName = actor.display_name || actor.username || 'Staff Member';
+
+        if (targetUser && targetUser.id !== actorId) {
+          const snippet = (assignmentNote && assignmentNote.trim()) || `Assigned to you by ${actorName}`;
+          await db.run(`
+            INSERT INTO user_notifications (user_id, actor_id, actor_name, type, ticket_id, ticket_number, comment_id, content_snippet)
+            VALUES (?, ?, ?, 'ASSIGNMENT', ?, ?, NULL, ?);
+          `, [
+            targetUser.id,
+            actorId,
+            actorName,
+            existingTicket.id,
+            existingTicket.ticket_number,
+            snippet.slice(0, 120)
+          ]);
+        }
+      } catch (notifErr) {
+        console.warn('Assignment notification error:', notifErr.message);
+      }
+    }
 
     // Background CRM sync (only if explicitly enabled or not disabled)
     if (syncCrm !== false) {
@@ -1220,6 +1655,7 @@ app.put('/api/tickets/:id', async (req, res) => {
     }
 
     const updated = await db.get('SELECT * FROM tickets WHERE id = ?;', [req.params.id]);
+    broadcastEvent('TICKET_UPDATED', { ticket: updated });
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1247,6 +1683,7 @@ app.post('/api/tickets/:id/parts-note', async (req, res) => {
     `, [trimmedNote || null, req.params.id]);
 
     const updated = await db.get('SELECT * FROM tickets WHERE id = ?;', [req.params.id]);
+    broadcastEvent('TICKET_UPDATED', { ticket: updated });
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1272,6 +1709,8 @@ app.delete('/api/tickets/:id', optionalAuthenticate, async (req, res) => {
     await db.run('DELETE FROM stage_logs WHERE ticket_id = ?;', [ticketId]);
     await db.run('DELETE FROM sla_alerts WHERE ticket_id = ?;', [ticketId]);
     await db.run('DELETE FROM tickets WHERE id = ?;', [ticketId]);
+
+    broadcastEvent('TICKET_DELETED', { ticketId: Number(ticketId) || ticketId, ticketNumber: ticket.ticket_number });
 
     res.json({ success: true, message: `Ticket ${ticket.ticket_number} deleted successfully` });
   } catch (err) {
@@ -1308,8 +1747,9 @@ app.get('/api/tickets/:id/comments', optionalAuthenticate, async (req, res) => {
  */
 app.post('/api/tickets/:id/comments', optionalAuthenticate, async (req, res) => {
   try {
-    const { content, parentId } = req.body;
-    if (!content || !content.trim()) {
+    const { content, comment, parentId } = req.body;
+    const resolvedContent = (content || comment || '').trim();
+    if (!resolvedContent) {
       return res.status(400).json({ error: 'Comment content cannot be empty.' });
     }
 
@@ -1324,7 +1764,7 @@ app.post('/api/tickets/:id/comments', optionalAuthenticate, async (req, res) => 
     const authorId = user.id || null;
 
     // Extract @mentions
-    const mentionMatches = content.match(/@([a-zA-Z0-9_\-]+)/g) || [];
+    const mentionMatches = resolvedContent.match(/@([a-zA-Z0-9_\-]+)/g) || [];
     const mentions = Array.from(new Set(mentionMatches.map(m => m.substring(1).toLowerCase())));
 
     const insertRes = await db.run(`
@@ -1336,7 +1776,7 @@ app.post('/api/tickets/:id/comments', optionalAuthenticate, async (req, res) => 
       authorId,
       authorName,
       authorRole,
-      content.trim(),
+      resolvedContent,
       mentions
     ]);
 
@@ -1358,15 +1798,18 @@ app.post('/api/tickets/:id/comments', optionalAuthenticate, async (req, res) => 
           ticket.id,
           ticket.ticket_number,
           commentId,
-          content.trim().slice(0, 120)
+          resolvedContent.slice(0, 120)
         ]);
       }
     }
 
     // 2. Notify mentioned users
     for (const uname of mentions) {
-      const targetUser = await db.getUserByUsername(uname);
-      if (targetUser && targetUser.id !== authorId) {
+      const targetUser = await db.get(
+        'SELECT id, username, display_name FROM users WHERE LOWER(username) = LOWER(?) OR LOWER(display_name) = LOWER(?);',
+        [uname, uname]
+      );
+      if (targetUser && (!authorId || targetUser.id !== authorId)) {
         await db.run(`
           INSERT INTO user_notifications (user_id, actor_id, actor_name, type, ticket_id, ticket_number, comment_id, content_snippet)
           VALUES (?, ?, ?, 'MENTION', ?, ?, ?, ?);
@@ -1377,7 +1820,7 @@ app.post('/api/tickets/:id/comments', optionalAuthenticate, async (req, res) => 
           ticket.id,
           ticket.ticket_number,
           commentId,
-          content.trim().slice(0, 120)
+          resolvedContent.slice(0, 120)
         ]);
       }
     }
@@ -1416,32 +1859,29 @@ app.delete('/api/tickets/:id/comments/:commentId', optionalAuthenticate, async (
 // ==========================================
 
 /**
- * Get notifications (mentions, replies) for current user
+ * Get notifications (mentions, replies, assignments) strictly for the current authenticated user
  */
 app.get('/api/notifications', optionalAuthenticate, async (req, res) => {
   try {
     const userId = req.user ? req.user.id : null;
-    let query = `
+    // If not logged in, return empty list and zero unread (never leak other users' notifications)
+    if (!userId) {
+      return res.json({ notifications: [], unreadCount: 0 });
+    }
+
+    const query = `
       SELECT n.*, t.vehicle_no, t.model, t.customer_name
       FROM user_notifications n
       LEFT JOIN tickets t ON n.ticket_id = t.id
+      WHERE n.user_id = ?
+      ORDER BY n.created_at DESC LIMIT 50;
     `;
-    const params = [];
-    if (userId) {
-      query += ` WHERE n.user_id = ?`;
-      params.push(userId);
-    }
-    query += ` ORDER BY n.created_at DESC LIMIT 50;`;
+    const notifications = await db.all(query, [userId]);
 
-    const notifications = await db.all(query, params);
-
-    let unreadQuery = `SELECT COUNT(*) as count FROM user_notifications WHERE is_read = false`;
-    const countParams = [];
-    if (userId) {
-      unreadQuery += ` AND user_id = ?`;
-      countParams.push(userId);
-    }
-    const unreadRes = await db.get(unreadQuery, countParams);
+    const unreadRes = await db.get(
+      `SELECT COUNT(*) as count FROM user_notifications WHERE user_id = ? AND is_read = false;`,
+      [userId]
+    );
 
     res.json({
       notifications: notifications || [],
@@ -1453,11 +1893,15 @@ app.get('/api/notifications', optionalAuthenticate, async (req, res) => {
 });
 
 /**
- * Mark single notification as read
+ * Mark single notification as read (strictly owned by current user)
  */
 app.patch('/api/notifications/:id/read', optionalAuthenticate, async (req, res) => {
   try {
-    await db.run('UPDATE user_notifications SET is_read = true WHERE id = ?;', [req.params.id]);
+    const userId = req.user ? req.user.id : null;
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    await db.run('UPDATE user_notifications SET is_read = true WHERE id = ? AND user_id = ?;', [req.params.id, userId]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1465,16 +1909,31 @@ app.patch('/api/notifications/:id/read', optionalAuthenticate, async (req, res) 
 });
 
 /**
- * Mark all notifications as read
+ * Mark all notifications as read for current user
  */
 app.post('/api/notifications/read-all', optionalAuthenticate, async (req, res) => {
   try {
     const userId = req.user ? req.user.id : null;
-    if (userId) {
-      await db.run('UPDATE user_notifications SET is_read = true WHERE user_id = ?;', [userId]);
-    } else {
-      await db.run('UPDATE user_notifications SET is_read = true;');
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
     }
+    await db.run('UPDATE user_notifications SET is_read = true WHERE user_id = ?;', [userId]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Delete a single notification (strictly owned by current user)
+ */
+app.delete('/api/notifications/:id', optionalAuthenticate, async (req, res) => {
+  try {
+    const userId = req.user ? req.user.id : null;
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    await db.run('DELETE FROM user_notifications WHERE id = ? AND user_id = ?;', [req.params.id, userId]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1506,9 +1965,14 @@ app.post('/api/tickets/:id/advance', optionalAuthenticate, async (req, res) => {
       resurveyRequired,
       notes,
       parts,
+      extraParts,
       partsStatusNote,
       partsApproval,
-      customerApprovalExempt
+      customerApprovalExempt,
+      poNumber,
+      purchaseId,
+      expectedArrivalDate,
+      orders
     } = req.body;
 
     if (req.user && req.user.role !== 'admin') {
@@ -1530,36 +1994,109 @@ app.post('/api/tickets/:id/advance', optionalAuthenticate, async (req, res) => {
       return res.status(400).json({ error: 'Invalid target stage.' });
     }
 
-    // Enforce parts arrival validation when moving to Stage 7 (Parts Arrival)
+    // At least 1 product / part item is mandatory for moving to estimate (Stage 2) or advancing beyond Stage 2
+    if (nextStageId === 2) {
+      const validSubmittedParts = Array.isArray(parts) ? parts.filter(p => (p.part_name || p.name || '').trim().length > 0) : [];
+      const existingParts = await db.getTicketParts(ticket.id);
+      if (validSubmittedParts.length === 0 && (!existingParts || existingParts.length === 0)) {
+        return res.status(400).json({ error: 'At least 1 product / part item is mandatory for moving to estimate.' });
+      }
+    } else if (nextStageId > 2 && Number(ticket.current_stage_id) <= 2) {
+      const existingParts = await db.getTicketParts(ticket.id);
+      const validSubmittedParts = Array.isArray(parts) ? parts.filter(p => (p.part_name || p.name || '').trim().length > 0) : [];
+      if ((!existingParts || existingParts.length === 0) && validSubmittedParts.length === 0) {
+        return res.status(400).json({ error: 'At least 1 product / part item is mandatory for an estimate.' });
+      }
+    }
+
+    // Handle parts arrival updates when moving to Stage 7 (Parts Arrival)
     if (nextStageId === 7) {
-      const { arrivedPartIds } = req.body;
+      const { arrivedPartIds, arrivedPartIndexes } = req.body;
       const nowIsoStamp = new Date().toISOString();
+      const currentParts = await db.getTicketParts(ticket.id);
 
       // If user selected parts in checklist, mark them arrived
       if (Array.isArray(arrivedPartIds) && arrivedPartIds.length > 0) {
         for (const pId of arrivedPartIds) {
           await db.updateTicketPartStatus(ticket.id, pId, 'ARRIVED', nowIsoStamp);
         }
-      }
-
-      // Verify all parts for this ticket are arrived
-      const currentParts = await db.getTicketParts(ticket.id);
-      if (currentParts.length > 0) {
-        const unarrivedParts = currentParts.filter(p => (p.part_status || '').toUpperCase() === 'ORDERED');
-        if (unarrivedParts.length > 0) {
-          const names = unarrivedParts.map(p => p.part_name).join(', ');
-          return res.status(400).json({
-            error: `All ordered parts must be ticked as arrived before proceeding to Parts Arrival. (${unarrivedParts.length} pending: ${names})`
-          });
+      } else if (Array.isArray(arrivedPartIndexes) && arrivedPartIndexes.length > 0 && currentParts.length > 0) {
+        for (const idx of arrivedPartIndexes) {
+          if (currentParts[idx]) {
+            await db.updateTicketPartStatus(ticket.id, currentParts[idx].id, 'ARRIVED', nowIsoStamp);
+          }
         }
       }
+      // Partial arrival is allowed: tickets can enter Stage 7 even if only some parts (e.g. 1/3) have arrived.
     }
 
-    // Handle parts approval checklist updates if submitted during advance (e.g. Stage 5 Approval)
+    // Handle parts approval checklist updates if submitted during advance (e.g. Stage 5 Approval or Stage 6 Order Placement)
     if (Array.isArray(partsApproval) && partsApproval.length > 0) {
+      const nowIso = new Date().toISOString();
       for (const p of partsApproval) {
         if (p && p.id) {
-          await db.updateTicketPartApproval(ticket.id, p.id, p);
+          const origPart = await db.get('SELECT * FROM ticket_parts WHERE id = ? AND ticket_id = ?;', [p.id, ticket.id]);
+          if (!origPart) continue;
+
+          if (p.order_qty !== undefined && p.stock_qty !== undefined) {
+            const orderQty = Math.max(0, Number(p.order_qty) || 0);
+            const stockQty = Math.max(0, Number(p.stock_qty) || 0);
+            const unitCost = Number(origPart.unit_cost) || 0;
+
+            if (orderQty > 0 && stockQty > 0) {
+              // Split fulfillment: original item gets orderQty (ORDERED)
+              await db.updateTicketPartApproval(ticket.id, p.id, {
+                quantity: orderQty,
+                total_cost: orderQty * unitCost,
+                part_status: 'ORDERED',
+                is_critical_to_start: p.is_critical_to_start,
+                customer_approval_status: p.customer_approval_status || origPart.customer_approval_status,
+                notes: (origPart.notes ? `${origPart.notes} | ` : '') + `Order placed for ${orderQty} pcs`
+              });
+
+              // Companion item gets stockQty fulfilled from warehouse (ARRIVED)
+              await db.addTicketPart(ticket.id, {
+                part_name: origPart.part_name,
+                part_code: origPart.part_code,
+                quantity: stockQty,
+                unit_cost: unitCost,
+                total_cost: stockQty * unitCost,
+                customer_approved_qty: Math.min(stockQty, Number(origPart.customer_approved_qty) || stockQty),
+                customer_approval_status: origPart.customer_approval_status || 'APPROVED',
+                insurance_approved: origPart.insurance_approved || 0,
+                insurance_approved_qty: Math.min(stockQty, Number(origPart.insurance_approved_qty) || 0),
+                company_approved: origPart.company_approved || 0,
+                part_status: 'ARRIVED',
+                arrived_at: nowIso,
+                notes: `Fulfilled from warehouse stock (${stockQty} pcs)`,
+                is_critical_to_start: p.is_critical_to_start || 0
+              });
+            } else if (orderQty === 0 && stockQty > 0) {
+              // 100% fulfilled from stock -> mark ARRIVED
+              await db.updateTicketPartApproval(ticket.id, p.id, {
+                quantity: stockQty,
+                total_cost: stockQty * unitCost,
+                part_status: 'ARRIVED',
+                arrived_at: nowIso,
+                is_critical_to_start: p.is_critical_to_start,
+                customer_approval_status: p.customer_approval_status || origPart.customer_approval_status,
+                notes: (origPart.notes ? `${origPart.notes} | ` : '') + `Fulfilled from warehouse stock (${stockQty} pcs)`
+              });
+            } else {
+              // 100% ordered -> mark ORDERED
+              await db.updateTicketPartApproval(ticket.id, p.id, {
+                quantity: orderQty,
+                total_cost: orderQty * unitCost,
+                part_status: 'ORDERED',
+                arrived_at: null,
+                is_critical_to_start: p.is_critical_to_start,
+                customer_approval_status: p.customer_approval_status || origPart.customer_approval_status,
+                notes: (origPart.notes ? `${origPart.notes} | ` : '') + `Order placed (${orderQty} pcs)`
+              });
+            }
+          } else {
+            await db.updateTicketPartApproval(ticket.id, p.id, p);
+          }
         }
       }
       await db.refreshTicketPartsSummary(ticket.id);
@@ -1592,7 +2129,30 @@ app.post('/api/tickets/:id/advance', optionalAuthenticate, async (req, res) => {
     let resolvedDamagedParts = damagedParts;
     let resolvedEstimatedCost = estimatedCost;
 
-    if (Array.isArray(parts) && parts.length > 0) {
+    // Handle unestimated extra parts added during Stage 6
+    if (nextStageId === 6 && Array.isArray(extraParts) && extraParts.length > 0) {
+      for (const ep of extraParts) {
+        if (ep && (ep.part_name || ep.name)) {
+          try {
+            await db.addTicketPart(ticket.id, {
+              part_name: ep.part_name || ep.name,
+              part_code: ep.part_code || ep.code,
+              quantity: Math.max(1, Number(ep.quantity || ep.qty) || 1),
+              unit_cost: Math.max(0, Number(ep.unit_cost || ep.cost) || 0),
+              total_cost: Number(ep.total_cost || ep.total),
+              part_status: 'ORDERED',
+              picked_locators: ep.picked_locators || null,
+              notes: 'Added as unestimated part during Stage 6'
+            });
+          } catch (err) {
+            console.error('Error adding extra part in Stage 6:', err.message);
+          }
+        }
+      }
+      await db.refreshTicketPartsSummary(ticket.id);
+    }
+
+    if (nextStageId !== 6 && Array.isArray(parts) && parts.length > 0) {
       const savedPartsResult = await db.saveTicketParts(ticket.id, parts);
       if (resolvedEstimatedCost === undefined || resolvedEstimatedCost === null || Number(resolvedEstimatedCost) === 0) {
         resolvedEstimatedCost = savedPartsResult.totalCost;
@@ -1621,6 +2181,37 @@ app.post('/api/tickets/:id/advance', optionalAuthenticate, async (req, res) => {
     if (partsStatusNote !== undefined) {
       updateFields.push('parts_status_note = ?');
       updateParams.push(partsStatusNote ? String(partsStatusNote).trim() : null);
+    }
+    const resolvedPurchaseId = (purchaseId || poNumber || '').trim();
+    if (resolvedPurchaseId) {
+      updateFields.push('po_number = ?');
+      updateParams.push(resolvedPurchaseId);
+    }
+    if (expectedArrivalDate) {
+      updateFields.push('expected_parts_arrival_date = ?');
+      updateParams.push(expectedArrivalDate);
+    }
+
+    // Process explicit orders list if supplied during advance to Stage 6
+    if (nextStageId === 6 && Array.isArray(orders) && orders.length > 0) {
+      for (const ord of orders) {
+        const pId = ord.partId || ord.id;
+        const pQty = Math.max(1, Number(ord.orderQty || ord.quantity) || 1);
+        const pPurchaseId = (ord.purchaseId || '').trim();
+        if (pId && pPurchaseId) {
+          try {
+            await db.orderTicketPart(ticket.id, pId, {
+              orderQty: pQty,
+              purchaseId: pPurchaseId,
+              notes: ord.notes || null,
+              expectedArrivalDate: ord.expectedArrivalDate || expectedArrivalDate || null
+            });
+          } catch (e) {
+            console.error('Error ordering part during advance:', e.message);
+          }
+        }
+      }
+      await db.refreshTicketPartsSummary(ticket.id);
     }
     if (insuranceCompany) {
       updateFields.push('insurance_company = ?');
@@ -1720,6 +2311,7 @@ app.post('/api/tickets/:id/advance', optionalAuthenticate, async (req, res) => {
     `, [ticket.id, nextStageId, targetStageConfig.name, nowIso, JSON.stringify(logData)]);
 
     const updatedTicket = await db.get('SELECT * FROM tickets WHERE id = ?;', [ticket.id]);
+    broadcastEvent('STAGE_ADVANCED', { ticket: updatedTicket });
     res.json(updatedTicket);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1789,6 +2381,7 @@ app.post('/api/tickets/:id/bypass', optionalAuthenticate, async (req, res) => {
     `, [ticket.id, nowIso, nowIso, JSON.stringify({ isBypassed: true, reason: bypassReasonText, notes })]);
 
     const updated = await db.get('SELECT * FROM tickets WHERE id = ?;', [ticket.id]);
+    broadcastEvent('STAGE_BYPASSED', { ticket: updated });
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1801,7 +2394,7 @@ app.post('/api/tickets/:id/bypass', optionalAuthenticate, async (req, res) => {
  */
 app.post('/api/tickets/:id/rollback', optionalAuthenticate, async (req, res) => {
   try {
-    const { targetStageId, confirmText } = req.body;
+    const { targetStageId, confirmText, confirmed, reason } = req.body;
     const ticket = await db.get('SELECT * FROM tickets WHERE id = ?;', [req.params.id]);
     if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
 
@@ -1814,43 +2407,169 @@ app.post('/api/tickets/:id/rollback', optionalAuthenticate, async (req, res) => 
       return res.status(400).json({ error: 'Target stage must be less than current stage' });
     }
 
-    if (!confirmText || confirmText.trim().toUpperCase() !== 'CONFIRM') {
-      return res.status(400).json({ error: 'Confirmation required. Must type CONFIRM to rollback stage.' });
+    const isConfirmed = confirmed === true || (confirmText && confirmText.trim().toUpperCase() === 'CONFIRM');
+    if (!isConfirmed) {
+      return res.status(400).json({ error: 'Confirmation required. Must confirm to rollback stage.' });
     }
 
     const nowIso = new Date().toISOString();
 
-    // Erase all stage logs after targetStageNum
+    // 1. Erase all stage logs after targetStageNum
+    // 1. Erase all stage logs after targetStageNum
     await db.run('DELETE FROM stage_logs WHERE ticket_id = ? AND stage_id > ?;', [ticket.id, targetStageNum]);
 
-    // Update the stage log for targetStageNum so that completed_at is NULL (it becomes active again)
-    await db.run(`
-      UPDATE stage_logs
-      SET completed_at = NULL,
-          elapsed_wd = 0,
-          sla_status = 'WITHIN_SLA'
-      WHERE ticket_id = ? AND stage_id = ?;
-    `, [ticket.id, targetStageNum]);
+    // 2. Reactivate stage log for targetStageNum and preserve SLA aging & entered_at
+    const targetLog = await db.get(
+      'SELECT * FROM stage_logs WHERE ticket_id = ? AND stage_id = ? ORDER BY id DESC LIMIT 1;',
+      [ticket.id, targetStageNum]
+    );
 
-    // Build fields to reset in tickets table
-    const dateFieldMap = {
-      2: ['estimate_date'],
-      3: ['insurance_intimation_date'],
-      4: ['survey_date'],
-      5: ['approval_date'],
-      6: ['parts_order_date'],
-      7: ['parts_arrival_date'],
-      8: ['work_start_date'],
-      9: ['work_complete_date'],
-      10: ['invoice_date'],
-      11: ['resurvey_date'],
-      12: ['delivery_date', 'closure_date']
+    const stConfig = (slaEngine.STAGE_CONFIG && slaEngine.STAGE_CONFIG.find(s => s.id === targetStageNum)) || null;
+    const slaLimit = stConfig ? stConfig.slaLimitWD : null;
+
+    let restoredEnteredAt = nowIso;
+    let restoredElapsedWd = 0;
+    let restoredSlaStatus = 'WITHIN_SLA';
+
+    const stageDateFieldMap = {
+      1: 'created_at',
+      2: 'estimate_date',
+      3: 'insurance_intimation_date',
+      4: 'survey_date',
+      5: 'approval_date',
+      6: 'parts_order_date',
+      7: 'parts_arrival_date',
+      8: 'work_start_date',
+      9: 'work_complete_date',
+      10: 'invoice_date',
+      11: 'resurvey_date',
+      12: 'waiting_delivery_date',
+      13: 'delivery_date'
     };
 
-    let resetFields = [];
+    if (targetLog && targetLog.entered_at) {
+      restoredEnteredAt = targetLog.entered_at;
+      // Calculate how many working days elapsed since the ticket originally entered targetStageNum
+      restoredElapsedWd = slaEngine.calculateWorkingDays(restoredEnteredAt, nowIso);
+
+      // If targetLog already had a higher elapsed_wd recorded (e.g. from when it completed previously), preserve that count
+      if (targetLog.elapsed_wd && Number(targetLog.elapsed_wd) > restoredElapsedWd) {
+        restoredElapsedWd = Number(targetLog.elapsed_wd);
+        // Rewind restoredEnteredAt so that calculateWorkingDays(restoredEnteredAt, nowIso) matches restoredElapsedWd
+        let rewindDate = new Date(nowIso);
+        let neededWd = restoredElapsedWd;
+        while (neededWd > 0) {
+          rewindDate.setDate(rewindDate.getDate() - 1);
+          if (slaEngine.isWorkingDay(rewindDate)) {
+            neededWd--;
+          }
+        }
+        restoredEnteredAt = rewindDate.toISOString();
+      }
+
+      restoredSlaStatus = (slaLimit !== null && restoredElapsedWd > slaLimit) ? 'BREACHED' : 'WITHIN_SLA';
+
+      await db.run(`
+        UPDATE stage_logs
+        SET completed_at = NULL,
+            elapsed_wd = ?,
+            sla_status = ?
+        WHERE id = ?;
+      `, [restoredElapsedWd, restoredSlaStatus, targetLog.id]);
+    } else {
+      // Fallback if targetLog doesn't exist
+      const fieldKey = stageDateFieldMap[targetStageNum];
+      if (targetStageNum === 1 && ticket.created_at) {
+        restoredEnteredAt = ticket.created_at;
+      } else if (fieldKey && ticket[fieldKey]) {
+        restoredEnteredAt = ticket[fieldKey];
+      } else if (ticket.current_stage_entered_at) {
+        restoredEnteredAt = ticket.current_stage_entered_at;
+      }
+
+      restoredElapsedWd = slaEngine.calculateWorkingDays(restoredEnteredAt, nowIso);
+      restoredSlaStatus = (slaLimit !== null && restoredElapsedWd > slaLimit) ? 'BREACHED' : 'WITHIN_SLA';
+
+      await db.run(`
+        INSERT INTO stage_logs (ticket_id, stage_id, stage_name, entered_at, sla_limit_wd, elapsed_wd, sla_status, data_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+      `, [
+        ticket.id,
+        targetStageNum,
+        stConfig ? stConfig.name : `Stage #${targetStageNum}`,
+        restoredEnteredAt,
+        slaLimit || 0,
+        restoredElapsedWd,
+        restoredSlaStatus,
+        JSON.stringify({ rollbackFrom: ticket.current_stage_id, reason: reason || 'Moved backward' })
+      ]);
+    }
+
+    // 3. Reset ticket_parts data depending on targetStageNum
+    if (targetStageNum < 2) {
+      // Rolled back to Stage 1: Restore physical inventory and delete all ticket_parts
+      const existingParts = await db.getTicketParts(ticket.id);
+      for (const p of existingParts) {
+        try {
+          await db.restorePartInventory(p);
+        } catch (e) {
+          console.error('Error restoring inventory on rollback to Stage 1:', e.message);
+        }
+      }
+      await db.run('DELETE FROM ticket_parts WHERE ticket_id = ?;', [ticket.id]);
+    } else {
+      // If targetStageNum < 7: clear arrival status
+      if (targetStageNum < 7) {
+        await db.run(`
+          UPDATE ticket_parts
+          SET arrived_at = NULL,
+              part_status = CASE WHEN ? >= 6 THEN 'ORDERED' ELSE 'PENDING_ORDER' END
+          WHERE ticket_id = ? AND part_status = 'ARRIVED';
+        `, [targetStageNum, ticket.id]);
+      }
+
+      // If targetStageNum < 6: clear ordered status
+      if (targetStageNum < 6) {
+        await db.run(`
+          UPDATE ticket_parts
+          SET part_status = 'PENDING_ORDER'
+          WHERE ticket_id = ? AND part_status = 'ORDERED';
+        `, [ticket.id]);
+      }
+
+      // If targetStageNum < 5: reset approval data
+      if (targetStageNum < 5) {
+        await db.run(`
+          UPDATE ticket_parts
+          SET insurance_approved = 0,
+              company_approved = 0,
+              insurance_approved_qty = 0,
+              customer_approval_status = 'PENDING',
+              customer_approved_qty = 0
+          WHERE ticket_id = ?;
+        `, [ticket.id]);
+      }
+    }
+
+    // 4. Reset ticket columns for stages beyond targetStageNum
+    const stageFieldResetMap = {
+      2: ['estimate_date = NULL', 'estimated_cost = NULL', 'damaged_parts = NULL'],
+      3: ['insurance_intimation_date = NULL', 'insurance_company = NULL'],
+      4: ['survey_date = NULL', 'surveyor_name = NULL', 'surveyor_phone = NULL'],
+      5: ['approval_date = NULL', 'customer_approval_exempt = 0'],
+      6: ['parts_order_date = NULL', 'parts_status_note = NULL'],
+      7: ['parts_arrival_date = NULL'],
+      8: ['work_start_date = NULL'],
+      9: ['work_complete_date = NULL'],
+      10: ['invoice_date = NULL'],
+      11: ['resurvey_date = NULL', 'waiting_delivery_date = NULL'],
+      12: ['delivery_date = NULL', 'closure_date = NULL']
+    };
+
+    let resetClauses = [];
     for (let s = targetStageNum + 1; s <= 12; s++) {
-      if (dateFieldMap[s]) {
-        dateFieldMap[s].forEach(f => resetFields.push(`${f} = NULL`));
+      if (stageFieldResetMap[s]) {
+        stageFieldResetMap[s].forEach(clause => resetClauses.push(clause));
       }
     }
 
@@ -1862,13 +2581,18 @@ app.post('/api/tickets/:id/rollback', optionalAuthenticate, async (req, res) => 
           current_stage_entered_at = ?,
           is_bypassed = 0,
           updated_at = CURRENT_TIMESTAMP
-          ${resetFields.length > 0 ? ', ' + resetFields.join(', ') : ''}
+          ${resetClauses.length > 0 ? ', ' + resetClauses.join(', ') : ''}
       WHERE id = ?;
     `;
 
-    await db.run(updateSql, [targetStageNum, newColumnStatus, nowIso, ticket.id]);
+    await db.run(updateSql, [targetStageNum, newColumnStatus, restoredEnteredAt, ticket.id]);
+
+    if (targetStageNum >= 2) {
+      await db.refreshTicketPartsSummary(ticket.id).catch(() => {});
+    }
 
     const updated = await db.get('SELECT * FROM tickets WHERE id = ?;', [ticket.id]);
+    broadcastEvent('STAGE_ROLLED_BACK', { ticket: updated });
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1911,19 +2635,27 @@ app.post('/api/tickets/:id/skip-to-stage', optionalAuthenticate, async (req, res
 
     // 2. Mark intermediate skipped stages
     for (let s = ticket.current_stage_id + 1; s < targetStageNum; s++) {
-      const stConfig = slaEngine.STAGES[s];
+      const stConfig = (slaEngine.STAGE_CONFIG && slaEngine.STAGE_CONFIG.find(st => st.id === s)) || null;
       await db.run(`
         INSERT INTO stage_logs (ticket_id, stage_id, stage_name, entered_at, completed_at, sla_limit_wd, elapsed_wd, sla_status, data_json)
         VALUES (?, ?, ?, ?, ?, ?, 0, 'SKIPPED', ?);
-      `, [ticket.id, s, stConfig ? stConfig.name : `Stage #${s}`, nowIso, nowIso, stConfig ? (stConfig.slaLimitWD || 0) : 0, JSON.stringify({ skipped: true, reason: reason || 'Skipped via pipeline' })]);
+      `, [
+        ticket.id,
+        s,
+        stConfig ? stConfig.name : `Stage #${s}`,
+        nowIso,
+        nowIso,
+        stConfig ? (stConfig.slaLimitWD || 0) : 0,
+        JSON.stringify({ skipped: true, reason: reason || 'Skipped via pipeline' })
+      ]);
     }
 
     // 3. Enter target stage
-    const targetStageConfig = slaEngine.STAGES[targetStageNum];
+    const targetStageConfig = (slaEngine.STAGE_CONFIG && slaEngine.STAGE_CONFIG.find(st => st.id === targetStageNum)) || null;
     await db.run(`
       INSERT INTO stage_logs (ticket_id, stage_id, stage_name, entered_at, sla_status, data_json)
       VALUES (?, ?, ?, ?, 'WITHIN_SLA', ?);
-    `, [ticket.id, targetStageNum, targetStageConfig.name, nowIso, JSON.stringify({ notes: reason || 'Entered via pipeline drag' })]);
+    `, [ticket.id, targetStageNum, targetStageConfig ? targetStageConfig.name : `Stage #${targetStageNum}`, nowIso, JSON.stringify({ notes: reason || 'Entered via pipeline drag' })]);
 
     let newColumnStatus = targetStageNum === 12 ? 'CLOSED' : 'IN_PROGRESS';
     let updateFields = [
@@ -1943,6 +2675,7 @@ app.post('/api/tickets/:id/skip-to-stage', optionalAuthenticate, async (req, res
     await db.run(`UPDATE tickets SET ${updateFields.join(', ')} WHERE id = ?;`, updateParams);
 
     const updated = await db.get('SELECT * FROM tickets WHERE id = ?;', [ticket.id]);
+    broadcastEvent('STAGE_SKIPPED', { ticket: updated });
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3037,72 +3770,108 @@ app.get('/api/stock/batches/:partNumber', async (req, res) => {
 });
 
 // ==========================================
+// PARTS MASTER CATALOG ENDPOINTS
+// ==========================================
+
+/**
+ * Import parts master catalog from CSV file
+ * One-time or manual re-import
+ */
+app.post('/api/master/import-csv', async (req, res) => {
+  try {
+    const pool = await db.getPool();
+
+    // Check if a file path was provided or if raw body contains CSV data
+    const csvFilePath = req.query.file;
+    if (csvFilePath) {
+      // Import from a local file path
+      const result = await masterImport.importMasterCsv(pool, csvFilePath);
+      return res.json({
+        success: true,
+        message: `Master catalog imported: ${result.upsertedCount} parts in ${result.durationMs}ms`,
+        stats: result
+      });
+    }
+
+    // Import from uploaded CSV body
+    if (!req.body || req.body.length === 0) {
+      return res.status(400).json({ error: 'No CSV data provided. Send raw CSV body or ?file=path query.' });
+    }
+
+    // Write buffer to temp file and import
+    const tmpPath = path.join(__dirname, '..', '_tmp_master_import.csv');
+    fs.writeFileSync(tmpPath, req.body);
+    try {
+      const result = await masterImport.importMasterCsv(pool, tmpPath);
+      res.json({
+        success: true,
+        message: `Master catalog imported: ${result.upsertedCount} parts in ${result.durationMs}ms`,
+        stats: result
+      });
+    } finally {
+      try { fs.unlinkSync(tmpPath); } catch (e) {}
+    }
+  } catch (err) {
+    console.error('Master CSV import error:', err);
+    res.status(500).json({ error: err.message || 'Failed to import master catalog' });
+  }
+});
+
+/**
+ * Get all distinct categories from parts_master
+ */
+app.get('/api/master/categories', async (req, res) => {
+  try {
+    const pool = await db.getPool();
+    const result = await pool.query(`
+      SELECT category_code, category_label, COUNT(*) as count
+      FROM parts_master
+      GROUP BY category_code, category_label
+      ORDER BY count DESC;
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
 // PARTS CATALOG & INVENTORY ENDPOINTS
 // ==========================================
 app.get('/api/parts', async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
-    const paginated = req.query.paginated === 'true';
+    const category = (req.query.category || '').trim();
     const inStock = req.query.inStock === 'true';
     const limit = parseInt(req.query.limit, 10) || 50;
     const offset = parseInt(req.query.offset, 10) || 0;
 
-    if (paginated) {
-      const pool = await db.getPool();
-      const result = await stockSync.searchPartsWithStock(pool, {
-        query: q,
-        inStockOnly: inStock,
-        limit,
-        offset
-      });
-      return res.json(result);
-    }
+    const pool = await db.getPool();
 
-    let sql = `
-      SELECT p.*,
-             COALESCE(tp_agg.total_ordered, 0) AS total_ordered,
-             COALESCE(tp_agg.pending_ordered, 0) AS pending_ordered,
-             COALESCE(pse_agg.entry_count, 0) AS entry_count
-      FROM parts p
-      LEFT JOIN (
-        SELECT part_code,
-               SUM(quantity) AS total_ordered,
-               SUM(CASE WHEN part_status = 'ORDERED' THEN quantity ELSE 0 END) AS pending_ordered
-        FROM ticket_parts
-        WHERE part_code IS NOT NULL AND part_code != ''
-        GROUP BY part_code
-      ) tp_agg ON tp_agg.part_code = p.part_code
-      LEFT JOIN (
-        SELECT part_number, COUNT(*) AS entry_count
-        FROM physical_stock_entries
-        WHERE part_number IS NOT NULL AND part_number != ''
-        GROUP BY part_number
-      ) pse_agg ON pse_agg.part_number = p.part_code
-    `;
-    const params = [];
-    if (q) {
-      const term = `%${q}%`;
-      sql += ` WHERE p.part_name ILIKE ? OR p.part_code ILIKE ? OR COALESCE(p.locators, '') ILIKE ? `;
-      params.push(term, term, term);
-    }
-    sql += ` ORDER BY CASE WHEN p.stock_qty > 0 THEN 0 ELSE 1 END, p.part_code ASC, p.part_name ASC`;
-
-    if (req.query.limit && req.query.limit !== 'all') {
-      const parsedLimit = parseInt(req.query.limit, 10);
-      if (parsedLimit > 0) {
-        sql += ` LIMIT ${parsedLimit}`;
-      }
-    }
-    sql += `;`;
-
-    const parts = await db.all(sql, params);
-    const enriched = parts.map(p => {
-      let stock_status = 'IN_STOCK';
-      if (p.stock_qty <= 0) stock_status = 'OUT_OF_STOCK';
-      else if (p.stock_qty <= 3) stock_status = 'LOW_STOCK';
-      return { ...p, stock_status };
+    // Use parts_master as authoritative source with stock data from physical_stock_entries
+    const result = await masterImport.searchMasterParts(pool, {
+      query: q,
+      category,
+      inStockOnly: inStock,
+      limit,
+      offset
     });
-    res.json(enriched);
+
+    // Enrich with stock status
+    const enriched = result.parts.map(p => {
+      const qty = Number(p.stock_qty) || 0;
+      let stock_status = 'IN_STOCK';
+      if (qty <= 0) stock_status = 'OUT_OF_STOCK';
+      else if (qty <= 3) stock_status = 'LOW_STOCK';
+      return { ...p, stock_qty: qty, stock_status };
+    });
+
+    res.json({
+      total: result.total,
+      parts: enriched,
+      limit: result.limit,
+      offset: result.offset
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3248,17 +4017,15 @@ app.get('/api/parts-orders', async (req, res) => {
 
     if (status && status !== 'ALL') {
       if (status === 'PCA') {
-        conditions.push(`t.current_stage_id > 5 AND UPPER(COALESCE(tp.customer_approval_status, '')) = 'PENDING' AND (tp.insurance_approved = 0 OR tp.insurance_approved IS NULL)`);
+        conditions.push(`t.current_stage_id >= 5 AND UPPER(COALESCE(tp.customer_approval_status, '')) = 'PENDING' AND (tp.insurance_approved = 0 OR tp.insurance_approved IS NULL)`);
       } else if (status === 'CA') {
-        conditions.push(`t.current_stage_id > 5 AND UPPER(COALESCE(tp.customer_approval_status, '')) = 'APPROVED'`);
+        conditions.push(`t.current_stage_id >= 5 AND UPPER(COALESCE(tp.customer_approval_status, '')) = 'APPROVED'`);
       } else if (status === 'POD') {
         conditions.push(`UPPER(COALESCE(tp.part_status, '')) = 'ORDERED'`);
       } else if (status === 'ARRIVED') {
         conditions.push(`UPPER(COALESCE(tp.part_status, '')) = 'ARRIVED'`);
       } else if (status === 'INSURANCE_APPROVED' || status === 'IA') {
         conditions.push(`(tp.insurance_approved = 1 OR tp.company_approved = 1)`);
-      } else if (status === 'EXEMPT') {
-        conditions.push(`(UPPER(COALESCE(tp.customer_approval_status, '')) = 'EXEMPT' OR t.customer_approval_exempt = 1)`);
       } else {
         conditions.push(`tp.part_status = ?`);
         params.push(status);
@@ -3303,17 +4070,15 @@ app.post('/api/parts-orders/bulk-action', optionalAuthenticate, async (req, res)
     const act = (action || '').toUpperCase().trim();
 
     if (act === 'CUSTOMER_APPROVE') {
-      await db.run(`UPDATE ticket_parts SET customer_approval_status = 'APPROVED' WHERE id IN (${placeholders})`, partIds);
+      await db.run(`UPDATE ticket_parts SET customer_approval_status = 'APPROVED', customer_approved_qty = GREATEST(0, COALESCE(quantity, 1) - COALESCE(insurance_approved_qty, 0)) WHERE id IN (${placeholders})`, partIds);
     } else if (act === 'INSURANCE_APPROVE') {
-      await db.run(`UPDATE ticket_parts SET insurance_approved = 1, company_approved = 1, customer_approval_status = 'NONE' WHERE id IN (${placeholders})`, partIds);
+      await db.run(`UPDATE ticket_parts SET insurance_approved = 1, company_approved = 1, insurance_approved_qty = COALESCE(quantity, 1), customer_approval_status = 'NONE', customer_approved_qty = 0 WHERE id IN (${placeholders})`, partIds);
     } else if (act === 'MARK_ARRIVED') {
       await db.run(`UPDATE ticket_parts SET part_status = 'ARRIVED', arrived_at = ? WHERE id IN (${placeholders})`, [nowIso, ...partIds]);
     } else if (act === 'MARK_ORDERED') {
       await db.run(`UPDATE ticket_parts SET part_status = 'ORDERED', arrived_at = NULL WHERE id IN (${placeholders})`, partIds);
-    } else if (act === 'EXEMPT') {
-      await db.run(`UPDATE ticket_parts SET customer_approval_status = 'EXEMPT' WHERE id IN (${placeholders})`, partIds);
     } else {
-      return res.status(400).json({ error: 'Invalid bulk action. Allowed: CUSTOMER_APPROVE, INSURANCE_APPROVE, MARK_ARRIVED, MARK_ORDERED, EXEMPT' });
+      return res.status(400).json({ error: 'Invalid bulk action. Allowed: CUSTOMER_APPROVE, INSURANCE_APPROVE, MARK_ARRIVED, MARK_ORDERED' });
     }
 
     const affectedTicketIds = [...new Set(existingParts.map(p => p.ticket_id).filter(Boolean))];
@@ -4093,6 +4858,22 @@ app.get('/api/metrics', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// SPA catch-all: serve React Vite SPA for non-API web/electron requests
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/js/vendor')) {
+    return next();
+  }
+  const clientIndexPath = path.join(__dirname, '..', 'client', 'dist', 'index.html');
+  if (fs.existsSync(clientIndexPath)) {
+    return res.sendFile(clientIndexPath);
+  }
+  const publicIndexPath = path.join(__dirname, '..', 'public', 'index.html');
+  if (fs.existsSync(publicIndexPath)) {
+    return res.sendFile(publicIndexPath);
+  }
+  next();
 });
 
 let runningServer = null;

@@ -649,28 +649,25 @@ function renderTicketPartsBadges(t) {
   if (total === 0) return '';
 
   const stageId = Number(t.current_stage_id) || 1;
-  // PCA, CA and Workshop Exemption tags only show after approval stage (Stage > 5)
-  const isAfterApproval = stageId > 5;
-  const pca = isAfterApproval ? (Number(t.pca_count) || 0) : 0;
-  const ca = isAfterApproval ? (Number(t.ca_count) || 0) : 0;
+  // PCA, CA tags show from approval stage onwards (Stage >= 5)
+  const isAfterApproval = stageId >= 5;
+  const pcaPendingQty = isAfterApproval ? (Number(t.pca_pending_qty !== undefined ? t.pca_pending_qty : t.pca_count) || 0) : 0;
+  const caQty = isAfterApproval ? (Number(t.ca_qty !== undefined ? t.ca_qty : t.ca_count) || 0) : 0;
+  const custNeededQty = isAfterApproval ? (Number(t.cust_needed_qty !== undefined ? t.cust_needed_qty : (caQty + pcaPendingQty)) || 0) : 0;
   const pod = stageId >= 6 ? (Number(t.pod_count) || 0) : 0;
-  const isExempt = isAfterApproval && Number(t.customer_approval_exempt) === 1;
 
-  if (pca === 0 && ca === 0 && pod === 0 && !isExempt) return '';
+  if (pcaPendingQty === 0 && caQty === 0 && pod === 0) return '';
 
   let html = `<div class="parts-approval-badges-wrap" onclick="event.stopPropagation();">`;
 
-  if (pca > 0) {
-    html += `<span class="tag-part-lifecycle tag-pca" onclick="openPartsApprovalModal(${t.id})" title="Pending Customer Approval: ${pca}/${total} parts. Click to review or approve.">PCA (${pca}/${total})</span>`;
+  if (pcaPendingQty > 0) {
+    html += `<span class="tag-part-lifecycle tag-pca" onclick="openPcaApprovalModal(${t.id})" title="Pending Customer Approval: ${pcaPendingQty} qty pending. Click to choose Customer Approval or Claim.">PCA (${pcaPendingQty})</span>`;
   }
-  if (ca > 0) {
-    html += `<span class="tag-part-lifecycle tag-ca" onclick="openPartsApprovalModal(${t.id})" title="Customer Approved: ${ca}/${total} parts. Click to view.">CA (${ca}/${total})</span>`;
+  if (caQty > 0) {
+    html += `<span class="tag-part-lifecycle tag-ca" onclick="openCaPurchaseModal(${t.id})" title="Customer Approved: ${caQty}/${custNeededQty} qty approved. Click to purchase or allocate stock.">CA (${caQty}/${custNeededQty})</span>`;
   }
   if (pod > 0) {
     html += `<span class="tag-part-lifecycle tag-pod" onclick="openPartsApprovalModal(${t.id})" title="Awaiting Delivery (POD): ${pod}/${total} parts. Click to view.">POD (${pod}/${total})</span>`;
-  }
-  if (isExempt && pca > 0) {
-    html += `<span class="tag-part-lifecycle tag-exempt" onclick="openPartsApprovalModal(${t.id})" title="Workshop Exemption active: Work and ordering proceed without customer pre-approval.">EXEMPT</span>`;
   }
 
   html += `</div>`;
@@ -2502,6 +2499,16 @@ function setupEventListeners() {
     });
   }
 
+  const ctxPartsApproval = document.getElementById('ctxActionPartsApproval');
+  if (ctxPartsApproval) {
+    ctxPartsApproval.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const tid = currentContextMenuTicketId;
+      closeTicketContextMenu();
+      if (tid) openPartsApprovalModal(tid);
+    });
+  }
+
   const ctxPartsArrival = document.getElementById('ctxActionPartsArrivalDetails');
   if (ctxPartsArrival) {
     ctxPartsArrival.addEventListener('click', (e) => {
@@ -3236,7 +3243,7 @@ async function openPartLocatorPicker({
   costInput,
   nameInput,
   partCode = '',
-  recalculateTotal = () => {}
+  recalculateTotal = () => { }
 }) {
   closePartLocatorPicker();
 
@@ -3352,13 +3359,15 @@ async function openPartLocatorPicker({
       }
     });
 
-    let avgUnitPrice = 0;
-    if (totalPicked > 0) {
-      avgUnitPrice = totalCost / totalPicked;
+    // Use higher price from batch instead of average
+    const pickedLocs = locators.filter(l => (l.pick_qty || 0) > 0);
+    let highestBatchPrice = 0;
+    if (pickedLocs.length > 0) {
+      highestBatchPrice = Math.max(...pickedLocs.map(l => Number(l.unit_price) || 0));
     } else if (locators.length > 0) {
-      avgUnitPrice = locators[0].unit_price;
+      highestBatchPrice = Math.max(...locators.map(l => Number(l.unit_price) || 0));
     } else {
-      avgUnitPrice = currentUnitCost;
+      highestBatchPrice = currentUnitCost;
     }
 
     let pickClass = 'is-matched';
@@ -3441,10 +3450,10 @@ async function openPartLocatorPicker({
 
       <div class="plp-calc-bar">
         <div class="plp-calc-text">
-          <span class="plp-calc-title">Average Unit Price (Selected):</span>
-          <span class="plp-calc-sub">${totalPicked > 0 ? `Based on ${totalPicked} units across selected locators` : `Default catalog price`}</span>
+          <span class="plp-calc-title">Batch Suggested Price (Highest):</span>
+          <span class="plp-calc-sub">${totalPicked > 0 ? `Highest unit price among selected batch locators` : `Highest price from catalog batches`}</span>
         </div>
-        <div class="plp-avg-val">₹${avgUnitPrice.toFixed(2)}</div>
+        <div class="plp-avg-val">₹${highestBatchPrice.toFixed(2)}</div>
       </div>
 
       <div class="plp-footer">
@@ -3556,7 +3565,7 @@ async function openPartLocatorPicker({
       }
 
       if (costInput) {
-        costInput.value = avgUnitPrice > 0 ? parseFloat(avgUnitPrice.toFixed(2)) : (costInput.value || 0);
+        costInput.value = highestBatchPrice > 0 ? parseFloat(highestBatchPrice.toFixed(2)) : (costInput.value || 0);
         costInput.classList.add('price-updated-flash');
         setTimeout(() => costInput.classList.remove('price-updated-flash'), 800);
       }
@@ -3641,19 +3650,18 @@ function setupPartsTableBuilder({
     tr.innerHTML = `
       <td style="position: relative;">
         <div class="part-row-input-wrap">
-          <input type="text" class="part-row-input part-row-name" placeholder="Search part #, name, or locator..." value="${escapeHtml(String(pName))}" autocomplete="off" data-selected-code="${escapeHtml(String(pCode))}">
+          <input type="text" class="part-row-input part-row-name" placeholder="Search part # or description..." value="${escapeHtml(String(pName))}" autocomplete="off" data-selected-code="${escapeHtml(String(pCode))}">
           <span class="part-row-db-action"></span>
         </div>
         <div class="suggestions-box part-sugg-dropdown" style="display:none;"></div>
       </td>
       <td style="text-align: center;">
         <div class="part-qty-cell-wrap">
-          <input type="number" class="part-row-input part-row-qty part-row-qty-trigger" value="${pQty}" min="1" step="1" style="text-align: center;" title="Click to pick warehouse locators and batch stock">
-          <span class="part-row-loc-summary-tag" style="display:none;" title="Assigned warehouse locators"></span>
+          <input type="number" class="part-row-input part-row-qty" value="${pQty}" min="1" step="1" style="text-align: center;" placeholder="Qty">
         </div>
       </td>
       <td style="text-align: right;">
-        <input type="number" class="part-row-input part-row-cost" value="${pCost}" min="0" step="any" style="text-align: right;">
+        <input type="number" class="part-row-input part-row-cost" value="${pCost}" min="0" step="any" style="text-align: right;" placeholder="0">
       </td>
       <td style="text-align: right;">
         <span class="part-row-amount">₹${pTotal.toLocaleString('en-IN')}</span>
@@ -3669,23 +3677,6 @@ function setupPartsTableBuilder({
     const qtyInput = tr.querySelector('.part-row-qty');
     const costInput = tr.querySelector('.part-row-cost');
     const removeBtn = tr.querySelector('.btn-part-row-remove');
-
-    // Populate existing picked locators if present
-    if (partData.picked_locators) {
-      try {
-        const picked = typeof partData.picked_locators === 'string' ? JSON.parse(partData.picked_locators) : partData.picked_locators;
-        if (Array.isArray(picked) && picked.length > 0) {
-          tr.dataset.pickedLocators = JSON.stringify(picked);
-          const locTagEl = tr.querySelector('.part-row-loc-summary-tag');
-          if (locTagEl) {
-            const summaryStr = picked.map(l => `${l.locator} (${l.pick_qty})`).join(', ');
-            locTagEl.innerHTML = `📍 ${escapeHtml(picked.length === 1 ? `${picked[0].locator} (${picked[0].pick_qty})` : `${picked.length} Locators`)}`;
-            locTagEl.title = `Picked from: ${summaryStr}`;
-            locTagEl.style.display = 'inline-flex';
-          }
-        }
-      } catch (e) { }
-    }
 
     async function checkPartInDb(partName, partCode) {
       if (!partName && !partCode) return null;
@@ -3720,31 +3711,20 @@ function setupPartsTableBuilder({
       const clean = (partName || '').trim();
       if (!clean) {
         dbActionEl.innerHTML = '';
-        nameInput.classList.remove('is-invalid-catalog');
         return;
       }
       const existingCode = nameInput.dataset.selectedCode || tr.dataset.partCode;
       const matched = await checkPartInDb(clean, existingCode);
       if (matched) {
-        nameInput.classList.remove('is-invalid-catalog');
         nameInput.dataset.selectedCode = matched.part_code || '';
         tr.dataset.partCode = matched.part_code || '';
-        dbActionEl.innerHTML = renderPartStockHoverPill(matched, costInput ? costInput.value : null);
-
-        // Clicking the stock pill opens the locator picker!
-        const pillWrap = dbActionEl.querySelector('.part-stock-pill-wrap');
-        if (pillWrap) {
-          pillWrap.style.cursor = 'pointer';
-          pillWrap.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            openPartLocatorPicker({ tr, qtyInput, costInput, nameInput, recalculateTotal });
-          });
+        if (matched.part_code) {
+          dbActionEl.innerHTML = `<span style="font-size: 9.5px; color: #475569; font-weight: 600; background: #f1f5f9; padding: 2px 5px; border-radius: 4px; letter-spacing: 0.3px;">${escapeHtml(matched.part_code)}</span>`;
+        } else {
+          dbActionEl.innerHTML = '';
         }
       } else {
-        // Enforce strict catalog only rule: not in catalog
-        nameInput.classList.add('is-invalid-catalog');
-        dbActionEl.innerHTML = renderPartUnregisteredPill();
+        dbActionEl.innerHTML = '';
       }
     }
 
@@ -3761,27 +3741,21 @@ function setupPartsTableBuilder({
             const itemDiv = document.createElement('div');
             itemDiv.className = 'part-sugg-item';
 
-            const stockQty = Number(p.stock_qty || 0);
-            const stockClass = stockQty > 3 ? 'in-stock' : (stockQty > 0 ? 'low-stock' : 'out-stock');
-            const stockText = stockQty > 0 ? `x${stockQty} in stock` : 'Out of stock';
-
             let pVariants = [];
             if (p.price_variants) {
               try {
                 pVariants = typeof p.price_variants === 'string' ? JSON.parse(p.price_variants) : p.price_variants;
-              } catch (e) {}
+              } catch (e) { }
             }
             pVariants = Array.isArray(pVariants) ? pVariants.filter(v => v && typeof v.price === 'number' && v.price > 0) : [];
 
-            let priceHtml = `₹${Number(p.default_cost || 0).toLocaleString('en-IN')}`;
-            if (pVariants.length > 1) {
-              const prices = pVariants.map(v => v.price).sort((a, b) => a - b);
-              const minP = prices[0];
-              const maxP = prices[prices.length - 1];
-              if (minP !== maxP) {
-                priceHtml = `₹${minP.toLocaleString('en-IN')} - ₹${maxP.toLocaleString('en-IN')}`;
+            // Suggested price: pick the higher price from batch
+            let higherPrice = Number(p.default_cost || 0);
+            if (pVariants.length > 0) {
+              const vPrices = pVariants.map(v => Number(v.price) || 0).filter(pr => pr > 0);
+              if (vPrices.length > 0) {
+                higherPrice = Math.max(...vPrices, higherPrice);
               }
-              priceHtml += `<div style="font-size: 9.5px; color: #2563eb; font-weight: 700; margin-top: 1px;">${pVariants.length} batch prices</div>`;
             }
 
             itemDiv.innerHTML = `
@@ -3790,13 +3764,10 @@ function setupPartsTableBuilder({
                   <span class="part-sugg-code">${escapeHtml(p.part_code || 'NO SKU')}</span>
                   <span class="part-sugg-desc" title="${escapeHtml(p.part_name || '')}">${escapeHtml(p.part_name || '')}</span>
                 </div>
-                <div class="part-sugg-bottom">
-                  ${p.locators ? `<span class="part-sugg-loc" title="Warehouse Bins / Rack">📍 ${escapeHtml(p.locators)}</span>` : '<span style="font-size:10px; color:#94a3b8;">No Locator</span>'}
-                </div>
               </div>
               <div class="part-sugg-right">
-                <div class="part-sugg-price">${priceHtml}</div>
-                <div class="part-sugg-stock ${stockClass}">${stockText}</div>
+                <div class="part-sugg-price">₹${higherPrice.toLocaleString('en-IN')}</div>
+                ${pVariants.length > 1 ? `<div style="font-size: 9px; color: #16a34a; font-weight: 600;">highest batch</div>` : ''}
               </div>
             `;
 
@@ -3805,23 +3776,21 @@ function setupPartsTableBuilder({
               nameInput.value = p.part_name;
               nameInput.dataset.selectedCode = p.part_code || '';
               tr.dataset.partCode = p.part_code || '';
-              costInput.value = p.default_cost || 0;
-              nameInput.classList.remove('is-invalid-catalog');
+              costInput.value = higherPrice;
               suggBox.style.display = 'none';
               updatePartDbStatus(p.part_name);
               recalculateTotal();
-              // Open locator picker when selecting part from dropdown
-              openPartLocatorPicker({ tr, qtyInput, costInput, nameInput, recalculateTotal });
+              // Person prepares estimation to demand part, qty, price. Move to demanded qty.
+              qtyInput.focus();
+              qtyInput.select();
             });
             suggBox.appendChild(itemDiv);
           });
-        } else {
-          // Explicit message when no catalog match is found
+        } else if (cleanQuery) {
           const emptyNotice = document.createElement('div');
-          emptyNotice.style.cssText = 'padding: 12px; font-size: 11.5px; color: #64748b; text-align: center; background: #f8fafc;';
+          emptyNotice.style.cssText = 'padding: 8px 12px; font-size: 11.5px; color: #64748b; text-align: center; background: #f8fafc;';
           emptyNotice.innerHTML = `
-            <div style="font-weight: 600; color: #475569; margin-bottom: 2px;">No matching physical stock items</div>
-            <div style="font-size: 10.5px; color: #94a3b8;">Custom parts cannot be typed directly. Please select from the catalog.</div>
+            <div style="font-size: 11px; color: #64748b;">Press Tab/Enter to use "<strong>${escapeHtml(cleanQuery)}</strong>"</div>
           `;
           suggBox.appendChild(emptyNotice);
         }
@@ -3861,23 +3830,7 @@ function setupPartsTableBuilder({
       updatePartDbStatus(pName);
     }
 
-    qtyInput.addEventListener('click', () => {
-      openPartLocatorPicker({ tr, qtyInput, costInput, nameInput, recalculateTotal });
-    });
-    qtyInput.addEventListener('focus', () => {
-      if (!activeLocatorPickerEl) {
-        openPartLocatorPicker({ tr, qtyInput, costInput, nameInput, recalculateTotal });
-      }
-    });
     qtyInput.addEventListener('input', recalculateTotal);
-
-    const locSummaryTag = tr.querySelector('.part-row-loc-summary-tag');
-    if (locSummaryTag) {
-      locSummaryTag.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openPartLocatorPicker({ tr, qtyInput, costInput, nameInput, recalculateTotal });
-      });
-    }
 
     costInput.addEventListener('input', () => {
       if (costInputEl) costInputEl.dataset.autocalc = 'true';
@@ -3924,7 +3877,6 @@ function setupPartsTableBuilder({
     getParts: () => {
       const rows = tbodyEl.querySelectorAll('tr.part-builder-row');
       const parts = [];
-      let hasInvalidCatalogPart = false;
 
       rows.forEach(tr => {
         const input = tr.querySelector('.part-row-name');
@@ -3943,9 +3895,6 @@ function setupPartsTableBuilder({
         }
 
         if (name) {
-          if (input.classList.contains('is-invalid-catalog')) {
-            hasInvalidCatalogPart = true;
-          }
           parts.push({
             part_name: name,
             part_code: code,
@@ -3956,10 +3905,6 @@ function setupPartsTableBuilder({
           });
         }
       });
-
-      if (hasInvalidCatalogPart) {
-        showToast('Please select all parts from the Physical Stock Catalog dropdown', 'warning');
-      }
 
       return parts;
     }
@@ -4036,6 +3981,47 @@ window.openAdvanceModal = async function (ticketOrId, requestedTargetStageId = n
 
   document.getElementById('modalAdvanceStage').style.display = 'flex';
 };
+
+function formatLocatorsSummary(locators) {
+  if (!locators) return '';
+  if (typeof locators === 'string') {
+    const trimmed = locators.trim();
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return formatLocatorsSummary(parsed);
+      } catch (e) {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+  if (Array.isArray(locators)) {
+    const names = locators.map(item => {
+      if (!item) return '';
+      if (typeof item === 'string') return item;
+      return item.locator || item.locator_1 || item.locator_2 || (item.bin ? `Bin ${item.bin}` : '') || '';
+    }).filter(Boolean);
+    return Array.from(new Set(names)).join(' / ');
+  }
+  if (typeof locators === 'object') {
+    return locators.locator || locators.locator_1 || locators.locator_2 || '';
+  }
+  return String(locators);
+}
+
+function getStage6FulfillmentChipHtml(totalQty, orderVal, stockVal) {
+  if (orderVal === 0 && stockVal === totalQty) {
+    return `<span class="stage6-chip-ready"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;margin-right:2px;"><polyline points="20 6 9 17 4 12"></polyline></svg> 100% Stock Ready (${stockVal} pcs)</span>`;
+  }
+  if (orderVal > 0 && stockVal > 0) {
+    return `<span class="stage6-chip-split"><span class="chip-stock">📦 ${stockVal} from stock</span><span class="chip-order">🛒 ${orderVal} to order</span></span>`;
+  }
+  if (orderVal > 0 && stockVal === 0) {
+    return `<span class="stage6-chip-order">🛒 ${orderVal} to order (PO)</span>`;
+  }
+  return `<span class="stage6-chip-stock">📦 ${stockVal} from stock</span>`;
+}
 
 function buildAdvanceDynamicFields(nextStageId, ticket) {
   if (nextStageId === 2) {
@@ -4118,46 +4104,111 @@ function buildAdvanceDynamicFields(nextStageId, ticket) {
     let partsChecklistHtml = '';
 
     if (partsList.length > 0) {
-      let iaCount = 0;
+      let totalInsQty = 0;
+      let totalQty = 0;
+      let totalInsCost = 0;
+      let totalCapCost = 0;
+      let totalEstimatedCost = 0;
+
       const rowsHtml = partsList.map(p => {
-        const isIa = p.insurance_approved === 1 || p.company_approved === 1;
-        if (isIa) iaCount++;
-        const cost = Number(p.total_cost || (p.quantity * (p.unit_cost || 0)));
+        const pQty = Number(p.quantity) || 1;
+        const insQty = (p.insurance_approved_qty !== undefined) ? Number(p.insurance_approved_qty) : ((p.insurance_approved === 1 || p.company_approved === 1) ? pQty : 0);
+        totalInsQty += insQty;
+        totalQty += pQty;
+
+        const unitCost = Number(p.unit_cost) || 0;
+        const totalCost = Number(p.total_cost || (pQty * unitCost));
+        totalEstimatedCost += totalCost;
+
+        const capQty = Math.max(0, pQty - insQty);
+        const itemInsCost = insQty * unitCost;
+        const itemCapCost = capQty * unitCost;
+        totalInsCost += itemInsCost;
+        totalCapCost += itemCapCost;
+
         return `
-          <div class="stage-part-row" data-part-id="${p.id}">
+          <div class="stage-part-row stage5-part-row" data-part-id="${p.id}" data-qty="${pQty}" data-unit-cost="${unitCost}">
             <div class="stage-part-info">
-              <span class="stage-part-name">${escapeHtml(p.part_name)} ${p.part_code ? `(${escapeHtml(p.part_code)})` : ''}</span>
-              <span class="stage-part-cost">Qty: ${p.quantity || 1} • ₹${cost.toLocaleString('en-IN')}</span>
+              <div class="stage-part-name-wrap">
+                <span class="stage-part-name">${escapeHtml(p.part_name)}</span>
+                ${p.part_code ? `<span class="stage-part-code-badge">${escapeHtml(p.part_code)}</span>` : ''}
+              </div>
+              <div class="stage-part-cost-details">
+                <span>Total Qty: <strong>${pQty}</strong></span>
+                <span class="bullet">•</span>
+                <span>₹${unitCost.toLocaleString('en-IN')}/unit</span>
+                <span class="bullet">•</span>
+                <span class="total-price-tag">₹${totalCost.toLocaleString('en-IN')}</span>
+              </div>
             </div>
-            <label class="stage-part-checkbox">
-              <input type="checkbox" class="adv-part-ia-cb" ${isIa ? 'checked' : ''}>
-              <span>Insurance Approved</span>
-            </label>
+            
+            <div class="stage5-part-actions">
+              <div class="stage5-qty-control">
+                <span class="qty-control-label">Ins. Approved:</span>
+                <div class="qty-stepper-wrap">
+                  <button type="button" class="btn-qty-step dec" title="Decrease Approved Qty">−</button>
+                  <input type="number" class="adv-part-ia-qty form-input" min="0" max="${pQty}" value="${insQty}">
+                  <button type="button" class="btn-qty-step inc" title="Increase Approved Qty">+</button>
+                </div>
+                <span class="qty-total-denom">/ ${pQty}</span>
+              </div>
+              
+              <div class="stage5-part-status-badge">
+                <span class="adv-part-cap-label ${capQty > 0 ? 'cap-active' : 'cap-covered'}">
+                  ${capQty > 0 ? `CAP: ${capQty} (₹${itemCapCost.toLocaleString('en-IN')})` : '✓ 100% Claim Approved'}
+                </span>
+              </div>
+            </div>
           </div>
         `;
       }).join('');
 
-      const pcaCount = partsList.length - iaCount;
+      const capTotal = totalQty - totalInsQty;
 
       partsChecklistHtml = `
-        <div class="stage-advance-parts-approval-card">
-          <div class="header-title">
-            <span>Parts Coverage Approval</span>
-            <span id="advStage5Stats" style="font-size: 11px; font-weight: 700; color: #047857;">
-              Insurance Approved: ${iaCount} | Customer to Bear (PCA): ${pcaCount} | Total: ${partsList.length}
-            </span>
+        <div class="stage5-approval-hero-card">
+          <div class="stage5-hero-header">
+            <div class="hero-header-left">
+              <div class="hero-icon-shield">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                  <polyline points="9 12 11 14 15 10"></polyline>
+                </svg>
+              </div>
+              <div>
+                <h4 class="hero-title">Surveyor Parts Coverage Breakdown</h4>
+                <p class="hero-subtitle">Specify quantity approved under insurance claim. Unapproved quantities become Customer Approval Pending (CAP).</p>
+              </div>
+            </div>
+            
+            <div class="hero-header-actions">
+              <button type="button" class="btn btn-xs btn-outline-success" id="btnStage5ApproveAll" style="padding: 4px 10px; font-weight: 600;">
+                ✓ Approve All Parts
+              </button>
+            </div>
           </div>
-          <div class="subtext">
-            Mark parts approved by Insurance Company. Unchecked parts will automatically be flagged as <strong>Pending Customer Approval (PCA)</strong> to be borne by the customer out-of-pocket.
+
+          <!-- Stats Ribbon Grid -->
+          <div class="stage5-stats-ribbon">
+            <div class="stage5-stat-card ins-approved">
+              <div class="stat-label">Insurance Covered</div>
+              <div class="stat-val" id="advStage5InsQty">${totalInsQty} <span class="stat-unit">qty</span></div>
+              <div class="stat-subtext" id="advStage5InsCost">₹${totalInsCost.toLocaleString('en-IN')}</div>
+            </div>
+            <div class="stage5-stat-card cap-pending">
+              <div class="stat-label">Customer Bear (CAP)</div>
+              <div class="stat-val" id="advStage5CapQty">${capTotal} <span class="stat-unit">qty</span></div>
+              <div class="stat-subtext" id="advStage5CapCost">₹${totalCapCost.toLocaleString('en-IN')}</div>
+            </div>
+            <div class="stage5-stat-card total-summary">
+              <div class="stat-label">Total Parts Estimate</div>
+              <div class="stat-val" id="advStage5TotalQty">${totalQty} <span class="stat-unit">items</span></div>
+              <div class="stat-subtext">₹${totalEstimatedCost.toLocaleString('en-IN')}</div>
+            </div>
           </div>
-          <div class="stage-parts-checklist" id="advPartsApprovalChecklist">
+
+          <div class="stage-parts-checklist stage5-parts-list" id="advPartsApprovalChecklist">
             ${rowsHtml}
-          </div>
-          <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #e2e8f0;">
-            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; font-weight: 600; color: #92400e;">
-              <input type="checkbox" id="advApprovalExemptCb" ${ticket.customer_approval_exempt ? 'checked' : ''}>
-              <span>Workshop Exemption (Order & Start Work without Customer Pre-Approval)</span>
-            </label>
           </div>
         </div>
       `;
@@ -4170,39 +4221,61 @@ function buildAdvanceDynamicFields(nextStageId, ticket) {
     }
 
     return `
-      <div class="alert-box" style="background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;margin-bottom:12px;">
-        <strong>Surveyor Approval Confirmation:</strong> Mark Insurance Approved parts below.
+      <div class="stage5-confirmation-banner">
+        <div class="banner-badge">Stage 5 Approval</div>
+        <div class="banner-text">Verify surveyor approval status and set claim-covered quantities below.</div>
       </div>
       ${partsChecklistHtml}
-      <div class="form-group" style="margin-top: 10px;">
-        <label for="advJobNotes">Approval / Surveyor Remarks (Optional)</label>
-        <textarea id="advJobNotes" class="form-textarea" rows="2" placeholder="e.g. Surveyor approved front bumper replacement under claim, minor clips to customer..."></textarea>
+      <div class="form-group stage5-remarks-group" style="margin-top: 14px;">
+        <label for="advJobNotes" style="font-weight: 600; font-size: 12.5px; color: var(--text-main);">
+          Surveyor Remarks & Approval Notes <span style="font-weight: normal; color: var(--text-muted); font-size: 11px;">(Optional)</span>
+        </label>
+        <textarea id="advJobNotes" class="form-textarea" rows="2" placeholder="e.g. Surveyor approved front bumper under claim. Minor body clips to be borne by customer..."></textarea>
       </div>
     `;
   }
 
   if (nextStageId === 6) {
-    // Stage 6: Parts Order (Review approved parts to order, mark critical to start, check claim and customer approvals)
+    // Stage 6: Parts Order (Review approved parts, allocate from available stock, set exact quantities to order)
     const partsList = (ticket && Array.isArray(ticket.parts)) ? ticket.parts : [];
     let partsChecklistHtml = '';
 
     if (partsList.length > 0) {
-      let approvedCount = 0;
+      let totalNeededQty = 0;
+      let totalToOrderQty = 0;
+      let totalStockQty = 0;
       let criticalCount = 0;
 
       const rowsHtml = partsList.map(p => {
+        const totalQty = Math.max(1, Number(p.quantity) || 1);
+        totalNeededQty += totalQty;
+
+        // Match inventory stock from state.parts
+        const matched = (state.parts && state.parts.length > 0)
+          ? state.parts.find(cp =>
+            (p.part_code && (cp.part_code || '').toLowerCase() === p.part_code.toLowerCase()) ||
+            (p.part_name && (cp.part_name || '').toLowerCase() === p.part_name.toLowerCase())
+          )
+          : null;
+
+        const stockAvail = matched ? Number(matched.stock_qty || 0) : 0;
+        const rawLocators = p.picked_locators || p.locators || (matched ? matched.locators : '') || '';
+        const cleanLocators = formatLocatorsSummary(rawLocators);
+
+        // Default order quantity: fulfill what we can from stock, order the balance
+        const defaultStock = Math.min(totalQty, stockAvail);
+        const defaultOrder = Math.max(0, totalQty - defaultStock);
+
+        totalToOrderQty += defaultOrder;
+        totalStockQty += defaultStock;
+
         const isIa = p.insurance_approved === 1 || p.company_approved === 1;
         const custStatus = (p.customer_approval_status || '').toUpperCase();
-        const isExempt = ticket.customer_approval_exempt === 1 || custStatus === 'EXEMPT';
         const isCustApproved = custStatus === 'APPROVED';
         const isCrit = p.is_critical_to_start === 1;
-        const isAlreadyOrdered = (p.part_status && p.part_status.toUpperCase() === 'ORDERED') && Number(ticket.current_stage_id) >= 6;
-        const isApprovedToOrder = isIa || isCustApproved || isExempt || isAlreadyOrdered;
-
-        if (isApprovedToOrder) approvedCount++;
         if (isCrit) criticalCount++;
 
-        const cost = Number(p.total_cost || (p.quantity * (p.unit_cost || 0)));
+        const cost = Number(p.total_cost || (totalQty * (p.unit_cost || 0)));
 
         const claimBadge = isIa
           ? `<span class="tag-part-lifecycle tag-ia" style="font-size: 10px;" title="Approved under insurance claim"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;margin-right:2px;"><polyline points="20 6 9 17 4 12"></polyline></svg>Claim Approved</span>`
@@ -4213,8 +4286,6 @@ function buildAdvanceDynamicFields(nextStageId, ticket) {
           custBadge = `<span class="tag-part-lifecycle" style="font-size: 10px; background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0;" title="No customer payment required">Covered by Claim</span>`;
         } else if (isCustApproved) {
           custBadge = `<span class="tag-part-lifecycle tag-ca" style="font-size: 10px;" title="Customer approved out-of-pocket payment">Cust. Approved (CA)</span>`;
-        } else if (isExempt) {
-          custBadge = `<span class="tag-part-lifecycle tag-exempt" style="font-size: 10px;" title="Workshop exemption active">Exempt</span>`;
         } else {
           custBadge = `
             <div style="display:inline-flex;align-items:center;gap:4px;">
@@ -4227,51 +4298,116 @@ function buildAdvanceDynamicFields(nextStageId, ticket) {
           `;
         }
 
+        const stockPill = stockAvail > 0
+          ? `
+            <span class="stage6-stock-tag in-stock" title="${cleanLocators ? `Warehouse Location: ${cleanLocators}` : 'Available in warehouse stock'}">
+              <span class="stock-dot in"></span>
+              <span><strong>${stockAvail}</strong> in stock</span>
+              ${cleanLocators ? `<span class="stock-loc-pill">📍 ${escapeHtml(cleanLocators)}</span>` : ''}
+            </span>
+          `
+          : `
+            <span class="stage6-stock-tag out-of-stock" title="No stock available in warehouse">
+              <span class="stock-dot out"></span>
+              <span>0 in stock</span>
+            </span>
+          `;
+
+        const chipHtml = getStage6FulfillmentChipHtml(totalQty, defaultOrder, defaultStock);
+
         return `
-          <div class="stage-part-order-row ${!isApprovedToOrder ? 'row-not-ordered' : ''}" data-part-id="${p.id}">
-            <div class="stage-part-order-left">
-              <input type="checkbox" class="adv-order-approved-cb" id="advOrderPart_${p.id}" data-part-id="${p.id}" ${isApprovedToOrder ? 'checked' : ''} title="Tick to approve ordering this part">
-              <div class="stage-part-info">
-                <label for="advOrderPart_${p.id}" class="stage-part-name" style="cursor:pointer;margin:0;">${escapeHtml(p.part_name)} ${p.part_code ? `(${escapeHtml(p.part_code)})` : ''}</label>
-                <span class="stage-part-cost">Qty: ${p.quantity || 1} • ₹${cost.toLocaleString('en-IN')}</span>
+          <div class="stage6-part-card stage-part-order-row" data-part-id="${p.id}" data-total-qty="${totalQty}" data-stock-qty="${stockAvail}">
+            <div class="stage6-part-header">
+              <div class="stage6-part-title-group">
+                <span class="stage6-part-name">${escapeHtml(p.part_name)}</span>
+                ${p.part_code ? `<span class="stage6-part-sku">${escapeHtml(p.part_code)}</span>` : ''}
+              </div>
+              <div class="stage6-part-badges">
+                ${claimBadge}
+                ${custBadge}
               </div>
             </div>
-            <div class="stage-part-order-badges">
-              ${claimBadge}
-              ${custBadge}
+
+            <div class="stage6-part-mid">
+              <div class="stage6-part-specs">
+                <span class="spec-item"><strong>${totalQty} pcs</strong> needed</span>
+                <span class="spec-dot">•</span>
+                <span class="spec-item spec-cost">₹${cost.toLocaleString('en-IN')}</span>
+              </div>
+              <div class="stage6-part-stock-badge">
+                ${stockPill}
+              </div>
             </div>
-            <div class="stage-part-order-right">
-              <label class="stage-part-critical-label" title="Mark if this part is strictly required before starting repair work (Stage 8)">
-                <input type="checkbox" class="adv-part-critical-cb" data-part-id="${p.id}" ${isCrit ? 'checked' : ''}>
-                <span>Critical to Start</span>
-              </label>
+
+            <div class="stage6-part-footer">
+              <div class="stage6-stepper-control">
+                <span class="stepper-label">TO ORDER</span>
+                <div class="stage6-stepper adv-order-qty-stepper">
+                  <button type="button" class="btn-stage6-step btn-adv-qty-step dec" title="Decrease order quantity">−</button>
+                  <input type="number" class="adv-order-qty-input stage6-stepper-input" data-part-id="${p.id}" min="0" max="${totalQty}" value="${defaultOrder}">
+                  <button type="button" class="btn-stage6-step btn-adv-qty-step inc" title="Increase order quantity">+</button>
+                </div>
+              </div>
+
+              <div class="stage6-fulfillment-chip adv-row-fulfillment-chip" id="advRowChip_${p.id}">
+                ${chipHtml}
+              </div>
+
+              <div class="stage6-critical-flag stage-part-order-right">
+                <label class="stage6-critical-cb-label stage-part-critical-label ${isCrit ? 'is-critical' : ''}" title="Mark if this part is strictly required before starting repair work (Stage 8)">
+                  <input type="checkbox" class="adv-part-critical-cb" data-part-id="${p.id}" ${isCrit ? 'checked' : ''}>
+                  <span class="critical-text">Critical to Start</span>
+                </label>
+              </div>
             </div>
           </div>
         `;
       }).join('');
 
       partsChecklistHtml = `
-        <div class="stage-advance-parts-order-card">
-          <div class="header-title">
-            <span>Parts Order & Procurement Approval</span>
-            <span id="advStage6Stats" style="font-size: 11px; font-weight: 700; color: #1e40af;">
-              Approved to Order: ${approvedCount} / ${partsList.length} | Critical to Start: ${criticalCount}
-            </span>
+        <div class="stage6-procurement-hero-card">
+          <!-- KPI Summary Ribbon -->
+          <div class="stage6-stats-ribbon">
+            <div class="stage6-stat-card total-needed">
+              <div class="stat-label">Total Needed</div>
+              <div class="stat-val" id="advStage6NeededQty">${totalNeededQty} <span class="stat-unit">pcs</span></div>
+              <div class="stat-subtext">Estimated Parts</div>
+            </div>
+            <div class="stage6-stat-card from-stock">
+              <div class="stat-label">From Stock</div>
+              <div class="stat-val" id="advStage6StockQty">${totalStockQty} <span class="stat-unit">pcs</span></div>
+              <div class="stat-subtext">Warehouse Inventory</div>
+            </div>
+            <div class="stage6-stat-card to-order">
+              <div class="stat-label">To Order (PO)</div>
+              <div class="stat-val" id="advStage6OrderQty">${totalToOrderQty} <span class="stat-unit">pcs</span></div>
+              <div class="stat-subtext">Supplier Purchase</div>
+            </div>
+            <div class="stage6-stat-card critical-flag">
+              <div class="stat-label">Critical Parts</div>
+              <div class="stat-val" id="advStage6CritQty">${criticalCount}</div>
+              <div class="stat-subtext">Blockers for Stage 8</div>
+            </div>
           </div>
-          <div class="adv-order-subtext">
-            Tick parts <strong>Approved to Order</strong>. Parts tagged <strong>Critical to Start</strong> must arrive before work start (Stage 8).
+
+          <!-- Quick Allocation Toolbar -->
+          <div class="stage6-quick-bar">
+            <span class="quick-bar-label">Quick Allocation:</span>
+            <div class="quick-btn-group">
+              <button type="button" class="stage6-quick-btn adv-quick-btn active" id="advBtnAutoStock" title="Fulfill from warehouse stock first, order only the remaining balance">
+                <span class="btn-icon">⚡</span> Auto-Fill from Stock
+              </button>
+              <button type="button" class="stage6-quick-btn adv-quick-btn" id="advBtnOrderAll" title="Order 100% of all parts from supplier">
+                <span class="btn-icon">🛒</span> Order All (100% PO)
+              </button>
+              <button type="button" class="stage6-quick-btn adv-quick-btn" id="advBtnStockOnly" title="Fulfill only from stock (0 to order)">
+                <span class="btn-icon">📦</span> Stock Only (0 to Order)
+              </button>
+            </div>
           </div>
-          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:8px;padding:4px 2px;border-bottom:1px solid #e2e8f0;font-size:11.5px;">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;color:#334155;margin:0;">
-              <input type="checkbox" id="advCheckAllApprovedToOrder" ${approvedCount === partsList.length ? 'checked' : ''} style="width:14px;height:14px;accent-color:#2563eb;cursor:pointer;">
-              <span>Select All Approved to Order</span>
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;color:#92400e;margin:0;">
-              <input type="checkbox" id="advOrderExemptCb" ${ticket.customer_approval_exempt ? 'checked' : ''} style="width:14px;height:14px;accent-color:#d97706;cursor:pointer;">
-              <span>Workshop Exemption (Proceed without customer approval)</span>
-            </label>
-          </div>
-          <div class="stage-parts-order-checklist" id="advPartsOrderChecklist">
+
+          <!-- Part Cards Checklist -->
+          <div class="stage6-parts-list stage-parts-order-checklist" id="advPartsOrderChecklist">
             ${rowsHtml}
           </div>
         </div>
@@ -4285,50 +4421,72 @@ function buildAdvanceDynamicFields(nextStageId, ticket) {
     }
 
     return `
-      <div class="alert-box" style="background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;margin-bottom:12px;">
-        <strong>Parts Order Placement:</strong> Review parts to be ordered, tick approved items, and flag critical components. SLA allows max 5 working days.
-      </div>
+
       ${partsChecklistHtml}
-      <div class="parts-builder-section" style="margin-bottom: 12px;">
-        <div class="parts-builder-header">
-          <label style="font-weight: 700; font-size: 11px; text-transform: uppercase; color: #475569; letter-spacing: 0.3px;">
-            + Add Additional Parts (Unestimated Items)
-          </label>
-          <span style="font-size: 11px; color: #94a3b8;">Add extra components if needed</span>
-        </div>
-        <div class="table-container" style="margin-top: 6px; margin-bottom: 8px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); overflow: visible;">
-          <table class="parts-builder-table" id="advPartsTable">
-            <thead>
-              <tr>
-                <th style="width: 44%;">Part Item / Description</th>
-                <th style="width: 14%; text-align: center;">Qty</th>
-                <th style="width: 20%; text-align: right;">Unit Price (₹)</th>
-                <th style="width: 22%; text-align: right;">Amount (₹)</th>
-                <th style="width: 36px; text-align: center;"></th>
-              </tr>
-            </thead>
-            <tbody id="advPartsTableBody">
-            </tbody>
-          </table>
-        </div>
-        <div class="parts-builder-actions">
-          <button type="button" class="btn btn-outline btn-xs" id="advBtnAddPartRow">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-            <span>Add Part Item</span>
+
+      <!-- Additional Unestimated Parts (Collapsible) -->
+      <div class="stage6-extra-parts-card">
+        <div class="stage6-extra-header" id="stage6ExtraToggleHeader">
+          <div class="stage6-extra-title-wrap">
+            <span class="stage6-extra-icon">➕</span>
+            <div>
+              <div class="stage6-extra-title">
+                <span>Additional Unestimated Parts</span>
+                <span id="stage6ExtraCountBadge" class="badge-extra-count" style="display:none;">0 items</span>
+              </div>
+              <div class="stage6-extra-desc">Optional: Add extra components discovered during order placement that were not in initial estimate</div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-outline btn-xs" id="stage6BtnToggleExtra">
+            <span id="stage6ToggleText">+ Add Extra Parts</span>
           </button>
-          <div class="parts-total-summary">
-            <span class="parts-total-label">Extra Parts Subtotal:</span>
-            <span class="parts-total-val" id="advPartsTotalVal">₹0</span>
+        </div>
+
+        <div class="stage6-extra-body" id="stage6ExtraBody" style="display: none; margin-top: 10px;">
+          <div class="table-container" style="border: 1px solid var(--border-light); border-radius: var(--radius-sm); overflow: visible;">
+            <table class="parts-builder-table" id="advPartsTable">
+              <thead>
+                <tr>
+                  <th style="width: 44%;">Part Item / Description</th>
+                  <th style="width: 14%; text-align: center;">Qty</th>
+                  <th style="width: 20%; text-align: right;">Unit Price (₹)</th>
+                  <th style="width: 22%; text-align: right;">Amount (₹)</th>
+                  <th style="width: 36px; text-align: center;"></th>
+                </tr>
+              </thead>
+              <tbody id="advPartsTableBody">
+              </tbody>
+            </table>
+          </div>
+          <div class="parts-builder-actions" style="margin-top: 8px;">
+            <button type="button" class="btn btn-outline btn-xs" id="advBtnAddPartRow">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              <span>Add Part Item</span>
+            </button>
+            <div class="parts-total-summary">
+              <span class="parts-total-label">Extra Parts Subtotal:</span>
+              <span class="parts-total-val" id="advPartsTotalVal">₹0</span>
+            </div>
           </div>
         </div>
       </div>
-      <div class="form-group" style="margin-top: 10px;">
-        <label for="advJobNotes">Order / Supplier Remarks (Optional)</label>
-        <textarea id="advJobNotes" class="form-textarea" rows="2" placeholder="e.g. Purchase order PO-2026-881 placed with Honda Central Depot..."></textarea>
-      </div>
-      <div class="form-group">
-        <label for="advEstimatedCost">Estimated Cost / Order Total (₹)</label>
-        <input type="number" id="advEstimatedCost" class="form-input" placeholder="0" step="any">
+
+      <!-- Remarks and Estimated Cost Form Fields -->
+      <div class="stage6-form-fields-grid">
+        <div class="form-group" style="margin-bottom:0;">
+          <label for="advJobNotes" style="font-weight: 600; font-size: 12px; color: var(--text-main); display: flex; align-items: center; gap: 5px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+            <span>Order / Supplier Remarks <span style="font-weight: normal; color: var(--text-muted); font-size: 11px;">(Optional)</span></span>
+          </label>
+          <textarea id="advJobNotes" class="form-textarea" rows="2" placeholder="e.g. Purchase order PO-2026-881 placed with Honda Central Depot. Expected within 3 days..."></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label for="advEstimatedCost" style="font-weight: 600; font-size: 12px; color: var(--text-main); display: flex; align-items: center; gap: 5px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+            <span>Estimated Cost / Order Total (₹)</span>
+          </label>
+          <input type="number" id="advEstimatedCost" class="form-input" placeholder="0" step="any">
+        </div>
       </div>
     `;
   }
@@ -4493,23 +4651,29 @@ function setupStageSpecificAutocomplete(nextStageId, ticket) {
     const costInputEl = document.getElementById('advEstimatedCost');
     const addBtnEl = document.getElementById('advBtnAddPartRow');
 
-    let initialParts = (ticket && Array.isArray(ticket.parts) && ticket.parts.length > 0) ? ticket.parts : [];
-    if (initialParts.length === 0 && ticket && ticket.damaged_parts) {
-      const legacyParts = ticket.damaged_parts.split(',').map(s => s.trim()).filter(Boolean);
-      if (legacyParts.length > 0) {
-        initialParts = legacyParts.map(p => ({ part_name: p, quantity: 1, unit_cost: 0 }));
+    let initialParts = [];
+    if (nextStageId === 2) {
+      initialParts = (ticket && Array.isArray(ticket.parts) && ticket.parts.length > 0) ? ticket.parts : [];
+      if (initialParts.length === 0 && ticket && ticket.damaged_parts) {
+        const legacyParts = ticket.damaged_parts.split(',').map(s => s.trim()).filter(Boolean);
+        if (legacyParts.length > 0) {
+          initialParts = legacyParts.map(p => ({ part_name: p, quantity: 1, unit_cost: 0 }));
+        }
       }
     }
+    // For Stage 6: initialParts starts empty because estimated parts are already in the procurement hero card above!
 
     state.advPartsBuilder = setupPartsTableBuilder({
       tbodyEl,
       totalValEl,
-      costInputEl,
+      costInputEl: nextStageId === 2 ? costInputEl : null,
       addBtnEl,
       initialParts
     });
 
-    if (ticket && ticket.estimated_cost && costInputEl) {
+    if (ticket && ticket.estimated_cost && costInputEl && nextStageId === 2) {
+      costInputEl.value = ticket.estimated_cost;
+    } else if (ticket && ticket.estimated_cost && costInputEl && nextStageId === 6 && !costInputEl.value) {
       costInputEl.value = ticket.estimated_cost;
     }
   }
@@ -4581,60 +4745,285 @@ function setupStageSpecificAutocomplete(nextStageId, ticket) {
     }
   }
 
-  // Stage 5: Live Counter Updates for Insurance Approval Checklist
+  // Stage 5: Live Counter Updates for Insurance Approval Qty Inputs & Steppers
   if (nextStageId === 5) {
-    const checkItems = document.querySelectorAll('#advPartsApprovalChecklist .adv-part-ia-cb');
-    const statsEl = document.getElementById('advStage5Stats');
-    const updateStats = () => {
-      const total = checkItems.length;
-      let ia = 0;
-      checkItems.forEach(cb => { if (cb.checked) ia++; });
-      const pca = total - ia;
-      if (statsEl) {
-        statsEl.textContent = `Insurance Approved: ${ia} | Customer to Bear (PCA): ${pca} | Total: ${total}`;
-      }
-    };
-    checkItems.forEach(cb => cb.addEventListener('change', updateStats));
-  }
-
-  // Stage 6: Live Counter & Toggle Updates for Parts Order Placement
-  if (nextStageId === 6) {
-    const orderCbs = document.querySelectorAll('#advPartsOrderChecklist .adv-order-approved-cb');
-    const critCbs = document.querySelectorAll('#advPartsOrderChecklist .adv-part-critical-cb');
-    const selectAllCb = document.getElementById('advCheckAllApprovedToOrder');
-    const statsEl = document.getElementById('advStage6Stats');
+    const qtyInputs = document.querySelectorAll('#advPartsApprovalChecklist .adv-part-ia-qty');
+    const insQtyEl = document.getElementById('advStage5InsQty');
+    const insCostEl = document.getElementById('advStage5InsCost');
+    const capQtyEl = document.getElementById('advStage5CapQty');
+    const capCostEl = document.getElementById('advStage5CapCost');
+    const approveAllBtn = document.getElementById('btnStage5ApproveAll');
 
     const updateStats = () => {
-      const total = orderCbs.length;
-      let approved = 0;
-      let crit = 0;
-      orderCbs.forEach(cb => {
-        if (cb.checked) approved++;
-        const row = cb.closest('.stage-part-order-row');
-        if (row) {
-          if (cb.checked) row.classList.remove('row-not-ordered');
-          else row.classList.add('row-not-ordered');
+      let totalIns = 0;
+      let totalQty = 0;
+      let totalInsCost = 0;
+      let totalCapCost = 0;
+
+      qtyInputs.forEach(inp => {
+        const row = inp.closest('.stage-part-row');
+        const pQty = Number(row?.dataset.qty) || 1;
+        const unitCost = Number(row?.dataset.unitCost) || 0;
+        const val = Math.max(0, Math.min(pQty, Number(inp.value) || 0));
+        inp.value = val;
+
+        totalIns += val;
+        totalQty += pQty;
+        const capQty = pQty - val;
+        const itemInsCost = val * unitCost;
+        const itemCapCost = capQty * unitCost;
+
+        totalInsCost += itemInsCost;
+        totalCapCost += itemCapCost;
+
+        const capLabel = row?.querySelector('.adv-part-cap-label');
+        if (capLabel) {
+          if (capQty > 0) {
+            capLabel.className = 'adv-part-cap-label cap-active';
+            capLabel.textContent = `CAP: ${capQty} (₹${itemCapCost.toLocaleString('en-IN')})`;
+          } else {
+            capLabel.className = 'adv-part-cap-label cap-covered';
+            capLabel.textContent = '✓ 100% Claim Approved';
+          }
         }
       });
-      critCbs.forEach(cb => { if (cb.checked) crit++; });
 
-      if (statsEl) {
-        statsEl.textContent = `Approved to Order: ${approved} / ${total} | Critical to Start: ${crit}`;
+      const capTotal = totalQty - totalIns;
+      if (insQtyEl) insQtyEl.innerHTML = `${totalIns} <span class="stat-unit">qty</span>`;
+      if (insCostEl) insCostEl.textContent = `₹${totalInsCost.toLocaleString('en-IN')}`;
+      if (capQtyEl) capQtyEl.innerHTML = `${capTotal} <span class="stat-unit">qty</span>`;
+      if (capCostEl) capCostEl.textContent = `₹${totalCapCost.toLocaleString('en-IN')}`;
+    };
+
+    qtyInputs.forEach(inp => {
+      inp.addEventListener('input', updateStats);
+      inp.addEventListener('change', updateStats);
+
+      const row = inp.closest('.stage-part-row');
+      const decBtn = row?.querySelector('.btn-qty-step.dec');
+      const incBtn = row?.querySelector('.btn-qty-step.inc');
+
+      if (decBtn) {
+        decBtn.addEventListener('click', () => {
+          const currentVal = Number(inp.value) || 0;
+          if (currentVal > 0) {
+            inp.value = currentVal - 1;
+            updateStats();
+          }
+        });
       }
-      if (selectAllCb) {
-        selectAllCb.checked = total > 0 && approved === total;
+
+      if (incBtn) {
+        incBtn.addEventListener('click', () => {
+          const pQty = Number(row?.dataset.qty) || 1;
+          const currentVal = Number(inp.value) || 0;
+          if (currentVal < pQty) {
+            inp.value = currentVal + 1;
+            updateStats();
+          }
+        });
+      }
+    });
+
+    if (approveAllBtn) {
+      approveAllBtn.addEventListener('click', () => {
+        qtyInputs.forEach(inp => {
+          const row = inp.closest('.stage-part-row');
+          const pQty = Number(row?.dataset.qty) || 1;
+          inp.value = pQty;
+        });
+        updateStats();
+      });
+    }
+  }
+
+  // Stage 6: Live Stepper & Quantity Allocation for Parts Order Placement
+  if (nextStageId === 6) {
+    const qtyInputs = document.querySelectorAll('#advPartsOrderChecklist .adv-order-qty-input');
+    const critCbs = document.querySelectorAll('#advPartsOrderChecklist .adv-part-critical-cb');
+    const kpiNeeded = document.getElementById('advStage6NeededQty');
+    const kpiStock = document.getElementById('advStage6StockQty');
+    const kpiOrder = document.getElementById('advStage6OrderQty');
+    const kpiCrit = document.getElementById('advStage6CritQty');
+
+    const updateFulfillmentChip = (inp) => {
+      const row = inp.closest('.stage-part-order-row');
+      if (!row) return;
+      const totalQty = Number(row.dataset.totalQty) || 1;
+      let orderVal = parseInt(inp.value);
+      if (isNaN(orderVal) || orderVal < 0) orderVal = 0;
+      if (orderVal > totalQty) orderVal = totalQty;
+      inp.value = orderVal;
+
+      const stockVal = Math.max(0, totalQty - orderVal);
+      const chipEl = row.querySelector('.adv-row-fulfillment-chip');
+      if (chipEl) {
+        chipEl.innerHTML = getStage6FulfillmentChipHtml(totalQty, orderVal, stockVal);
       }
     };
 
-    orderCbs.forEach(cb => cb.addEventListener('change', updateStats));
-    critCbs.forEach(cb => cb.addEventListener('change', updateStats));
+    const updateStage6Summary = () => {
+      let totalNeeded = 0;
+      let totalToOrder = 0;
+      let totalFromStock = 0;
+      let critCount = 0;
 
-    if (selectAllCb) {
-      selectAllCb.addEventListener('change', () => {
-        const isChecked = selectAllCb.checked;
-        orderCbs.forEach(cb => { cb.checked = isChecked; });
-        updateStats();
+      qtyInputs.forEach(inp => {
+        const row = inp.closest('.stage-part-order-row');
+        if (!row) return;
+        const totalQty = Number(row.dataset.totalQty) || 1;
+        const orderVal = Math.max(0, Math.min(totalQty, parseInt(inp.value) || 0));
+        const stockVal = Math.max(0, totalQty - orderVal);
+
+        totalNeeded += totalQty;
+        totalToOrder += orderVal;
+        totalFromStock += stockVal;
       });
+
+      critCbs.forEach(cb => {
+        if (cb.checked) critCount++;
+        const label = cb.closest('.stage6-critical-cb-label');
+        if (label) label.classList.toggle('is-critical', cb.checked);
+      });
+
+      if (kpiNeeded) kpiNeeded.innerHTML = `${totalNeeded} <span class="stat-unit">pcs</span>`;
+      if (kpiStock) kpiStock.innerHTML = `${totalFromStock} <span class="stat-unit">pcs</span>`;
+      if (kpiOrder) kpiOrder.innerHTML = `${totalToOrder} <span class="stat-unit">pcs</span>`;
+      if (kpiCrit) kpiCrit.textContent = String(critCount);
+    };
+
+    qtyInputs.forEach(inp => {
+      inp.addEventListener('input', () => {
+        updateFulfillmentChip(inp);
+        updateStage6Summary();
+      });
+      inp.addEventListener('change', () => {
+        updateFulfillmentChip(inp);
+        updateStage6Summary();
+      });
+
+      const row = inp.closest('.stage-part-order-row');
+      const decBtn = row?.querySelector('.btn-adv-qty-step.dec, .btn-stage6-step.dec');
+      const incBtn = row?.querySelector('.btn-adv-qty-step.inc, .btn-stage6-step.inc');
+
+      if (decBtn) {
+        decBtn.addEventListener('click', () => {
+          const currentVal = Number(inp.value) || 0;
+          if (currentVal > 0) {
+            inp.value = currentVal - 1;
+            updateFulfillmentChip(inp);
+            updateStage6Summary();
+          }
+        });
+      }
+
+      if (incBtn) {
+        incBtn.addEventListener('click', () => {
+          const totalQty = Number(row?.dataset.totalQty) || 1;
+          const currentVal = Number(inp.value) || 0;
+          if (currentVal < totalQty) {
+            inp.value = currentVal + 1;
+            updateFulfillmentChip(inp);
+            updateStage6Summary();
+          }
+        });
+      }
+    });
+
+    critCbs.forEach(cb => cb.addEventListener('change', updateStage6Summary));
+
+    // Quick Allocation Buttons
+    const btnAuto = document.getElementById('advBtnAutoStock');
+    const btnAll = document.getElementById('advBtnOrderAll');
+    const btnStock = document.getElementById('advBtnStockOnly');
+
+    const setQuickActive = (activeBtn) => {
+      [btnAuto, btnAll, btnStock].forEach(b => b?.classList.remove('active'));
+      activeBtn?.classList.add('active');
+    };
+
+    if (btnAuto) {
+      btnAuto.addEventListener('click', () => {
+        setQuickActive(btnAuto);
+        qtyInputs.forEach(inp => {
+          const row = inp.closest('.stage-part-order-row');
+          const totalQty = Number(row?.dataset.totalQty) || 1;
+          const stockAvail = Number(row?.dataset.stockQty) || 0;
+          const neededOrder = Math.max(0, totalQty - stockAvail);
+          inp.value = neededOrder;
+          updateFulfillmentChip(inp);
+        });
+        updateStage6Summary();
+      });
+    }
+
+    if (btnAll) {
+      btnAll.addEventListener('click', () => {
+        setQuickActive(btnAll);
+        qtyInputs.forEach(inp => {
+          const row = inp.closest('.stage-part-order-row');
+          const totalQty = Number(row?.dataset.totalQty) || 1;
+          inp.value = totalQty;
+          updateFulfillmentChip(inp);
+        });
+        updateStage6Summary();
+      });
+    }
+
+    if (btnStock) {
+      btnStock.addEventListener('click', () => {
+        setQuickActive(btnStock);
+        qtyInputs.forEach(inp => {
+          inp.value = 0;
+          updateFulfillmentChip(inp);
+        });
+        updateStage6Summary();
+      });
+    }
+
+    // Toggle for Extra Unestimated Parts
+    const btnToggleExtra = document.getElementById('stage6BtnToggleExtra');
+    const bodyExtra = document.getElementById('stage6ExtraBody');
+    const textToggle = document.getElementById('stage6ToggleText');
+    const countBadge = document.getElementById('stage6ExtraCountBadge');
+
+    const toggleExtraDrawer = () => {
+      if (!bodyExtra) return;
+      const isHidden = bodyExtra.style.display === 'none';
+      bodyExtra.style.display = isHidden ? 'block' : 'none';
+      if (textToggle) {
+        textToggle.textContent = isHidden ? '− Close Extra Parts' : '+ Add Extra Parts';
+      }
+      if (isHidden) {
+        const rows = bodyExtra.querySelectorAll('tr.part-builder-row');
+        if (rows.length === 0) {
+          const addBtn = document.getElementById('advBtnAddPartRow');
+          if (addBtn) addBtn.click();
+        }
+      }
+    };
+
+    if (btnToggleExtra) {
+      btnToggleExtra.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleExtraDrawer();
+      });
+    }
+
+    // Update count badge when extra rows are added or removed
+    const extraTableBody = document.getElementById('advPartsTableBody');
+    if (extraTableBody && countBadge) {
+      const updateExtraBadge = () => {
+        const count = extraTableBody.querySelectorAll('tr.part-builder-row').length;
+        if (count > 0) {
+          countBadge.style.display = 'inline-block';
+          countBadge.textContent = `${count} ${count === 1 ? 'item' : 'items'}`;
+        } else {
+          countBadge.style.display = 'none';
+        }
+      };
+      const observer = new MutationObserver(updateExtraBadge);
+      observer.observe(extraTableBody, { childList: true });
     }
   }
 
@@ -4727,21 +5116,20 @@ async function handleAdvanceStageSubmit(e) {
       const partsApproval = [];
       partRows.forEach(row => {
         const partId = Number(row.dataset.partId);
-        const insApprovedCb = row.querySelector('.adv-part-ia-cb');
-        const isIa = insApprovedCb ? insApprovedCb.checked : false;
+        const totalQty = Number(row.dataset.qty) || 1;
+        const insQtyInput = row.querySelector('.adv-part-ia-qty');
+        const insQty = insQtyInput ? Math.max(0, Math.min(totalQty, Number(insQtyInput.value) || 0)) : 0;
+        const capQty = totalQty - insQty;
         partsApproval.push({
           id: partId,
-          insurance_approved: isIa ? 1 : 0,
-          company_approved: isIa ? 1 : 0,
-          customer_approval_status: isIa ? 'NONE' : 'PENDING'
+          insurance_approved_qty: insQty,
+          insurance_approved: insQty > 0 ? 1 : 0,
+          company_approved: insQty > 0 ? 1 : 0,
+          customer_approval_status: insQty >= totalQty ? 'NONE' : 'PENDING'
         });
       });
       payload.partsApproval = partsApproval;
       payload.partsOrderRequired = partsApproval.length > 0;
-    }
-    const exemptCb = document.getElementById('advApprovalExemptCb');
-    if (exemptCb) {
-      payload.customerApprovalExempt = exemptCb.checked;
     }
   }
 
@@ -4751,18 +5139,29 @@ async function handleAdvanceStageSubmit(e) {
       const partsApproval = [];
       orderRows.forEach(row => {
         const partId = Number(row.dataset.partId);
-        const orderApprovedCb = row.querySelector('.adv-order-approved-cb');
+        const totalQty = Number(row.dataset.totalQty) || 1;
+        const stockAvail = Number(row.dataset.stockQty) || 0;
+        const orderQtyInp = row.querySelector('.adv-order-qty-input');
+        const orderQty = orderQtyInp ? Math.max(0, Math.min(totalQty, Number(orderQtyInp.value) || 0)) : totalQty;
         const criticalCb = row.querySelector('.adv-part-critical-cb');
         const custApproveCb = row.querySelector('.adv-cust-approved-cb');
 
-        const isApprovedToOrder = orderApprovedCb ? orderApprovedCb.checked : true;
         const isCritical = criticalCb ? criticalCb.checked : false;
+        const fromStockQty = Math.max(0, totalQty - orderQty);
 
         const updateItem = {
           id: partId,
-          part_status: isApprovedToOrder ? 'ORDERED' : 'ON_HOLD',
+          total_qty: totalQty,
+          order_qty: orderQty,
+          stock_qty: fromStockQty,
+          part_status: orderQty > 0 ? 'ORDERED' : 'ARRIVED',
           is_critical_to_start: isCritical ? 1 : 0
         };
+
+        if (fromStockQty > 0 && orderQty === 0) {
+          updateItem.arrived_at = new Date().toISOString();
+          updateItem.notes = 'Fulfilled from warehouse stock';
+        }
 
         if (custApproveCb && custApproveCb.checked) {
           updateItem.customer_approval_status = 'APPROVED';
@@ -4771,12 +5170,7 @@ async function handleAdvanceStageSubmit(e) {
         partsApproval.push(updateItem);
       });
       payload.partsApproval = partsApproval;
-      payload.partsOrderRequired = partsApproval.some(p => p.part_status === 'ORDERED');
-    }
-
-    const orderExemptCb = document.getElementById('advOrderExemptCb');
-    if (orderExemptCb) {
-      payload.customerApprovalExempt = orderExemptCb.checked;
+      payload.partsOrderRequired = partsApproval.some(p => p.order_qty > 0);
     }
   }
 
@@ -4789,7 +5183,7 @@ async function handleAdvanceStageSubmit(e) {
     }
   }
 
-  if ((targetStageId === 2 || targetStageId === 6) && state.advPartsBuilder) {
+  if (targetStageId === 2 && state.advPartsBuilder) {
     const parts = state.advPartsBuilder.getParts();
     payload.parts = parts;
     const notes = document.getElementById('advJobNotes')?.value?.trim() || '';
@@ -4798,6 +5192,16 @@ async function handleAdvanceStageSubmit(e) {
       payload.damagedParts = notes ? `${summary} • ${notes}` : summary;
     } else if (notes) {
       payload.damagedParts = notes;
+    }
+  } else if (targetStageId === 6 && state.advPartsBuilder) {
+    const extraParts = state.advPartsBuilder.getParts();
+    if (extraParts.length > 0) {
+      payload.extraParts = extraParts;
+    }
+    const notes = document.getElementById('advJobNotes')?.value?.trim() || '';
+    if (notes) {
+      payload.notes = notes;
+      payload.partsStatusNote = notes;
     }
   } else {
     const partsEl = document.getElementById('advDamagedParts') || document.getElementById('advPartsOrdered');
@@ -5076,7 +5480,6 @@ window.openTicketPage = async function (ticketId) {
           if (isIa) apprBadge = `<span class="tag-part-lifecycle tag-ia" style="font-size: 10px;">Insurance Approved</span>`;
           else if (!isDrawerAfterApproval) apprBadge = `<span class="tag-part-lifecycle" style="font-size: 10px; background:#f8fafc; color:#64748b; border: 1px solid #cbd5e1;">Awaiting Approval</span>`;
           else if (custStatus === 'APPROVED') apprBadge = `<span class="tag-part-lifecycle tag-ca" style="font-size: 10px;">Cust. Approved (CA)</span>`;
-          else if (custStatus === 'EXEMPT' || ticket.customer_approval_exempt === 1) apprBadge = `<span class="tag-part-lifecycle tag-exempt" style="font-size: 10px;">Exempt</span>`;
           else apprBadge = `<span class="tag-part-lifecycle tag-pca" style="font-size: 10px;">Pending Cust. (PCA)</span>`;
 
           const isOrdered = (p.part_status || '').toUpperCase() === 'ORDERED' && Number(ticket.current_stage_id) >= 6;
@@ -6084,6 +6487,12 @@ window.openTicketContextMenu = async function (e, ticketId) {
     ctxPartsOrder.style.display = (ticket.current_stage_id === 6) ? 'flex' : 'none';
   }
 
+  // Stage >= 5 (Approval+): Show "Parts Approval" shortcut
+  const ctxPartsApproval = document.getElementById('ctxActionPartsApproval');
+  if (ctxPartsApproval) {
+    ctxPartsApproval.style.display = (ticket.current_stage_id >= 5) ? 'flex' : 'none';
+  }
+
   // Stage 7 (Parts Arrival): Show "Parts Arrival Details" option to view arrival logged times
   const ctxPartsArrival = document.getElementById('ctxActionPartsArrivalDetails');
   if (ctxPartsArrival) {
@@ -6589,11 +6998,6 @@ window.openPartsApprovalModal = async function (ticketId) {
       subEl.textContent = `${ticket.vehicle_no || ticket.model || 'Honda'} • ${ticket.customer_name || 'Customer'} (${ticket.customer_phone || '—'}) • Stage #${ticket.current_stage_id}`;
     }
 
-    const exemptCb = document.getElementById('paExemptCheckbox');
-    if (exemptCb) {
-      exemptCb.checked = (ticket.customer_approval_exempt === 1);
-    }
-
     renderPaStatsRibbon(stats);
     renderPaPartsTable(state.currentPaParts);
     setupPaNewPartAutocomplete();
@@ -6625,17 +7029,19 @@ function updatePaLiveStats() {
   const total = rows.length;
   let ia = 0, pca = 0, ca = 0, pod = 0, arrived = 0;
   const currentStage = state.currentPaTicket ? Number(state.currentPaTicket.current_stage_id) : 1;
-  const isAfterApproval = currentStage > 5;
+  const isAfterApproval = currentStage >= 5;
 
   rows.forEach(r => {
-    const isIa = r.querySelector('.pa-row-ia-cb')?.checked;
-    const custStatus = (r.querySelector('.pa-row-ca-sel')?.value || '').toUpperCase();
+    const pQty = Number(r.dataset.qty) || 1;
+    const insQty = Number(r.querySelector('.pa-row-ia-qty')?.value) || 0;
+    const custQty = Number(r.querySelector('.pa-row-ca-qty')?.value) || 0;
     const isArrived = r.dataset.status === 'ARRIVED';
     const isOrdered = r.dataset.status === 'ORDERED';
 
-    if (isIa) ia++;
-    if (isAfterApproval && custStatus === 'PENDING' && !isIa) pca++;
-    if (isAfterApproval && custStatus === 'APPROVED') ca++;
+    if (insQty > 0) ia++;
+    const pendingQty = Math.max(0, pQty - insQty - custQty);
+    if (isAfterApproval && pendingQty > 0 && insQty < pQty) pca++;
+    if (isAfterApproval && custQty > 0) ca++;
     if (isArrived) arrived++;
     else if (isOrdered) pod++;
   });
@@ -6680,8 +7086,11 @@ function renderPaPartsTable(parts) {
     const isHold = rawStatus === 'ON_HOLD';
     tr.dataset.status = isArrived ? 'ARRIVED' : (isOrdered ? 'ORDERED' : (isHold ? 'ON_HOLD' : 'PENDING_ORDER'));
 
-    const isIa = (p.insurance_approved === 1 || p.company_approved === 1);
-    const custStatus = (p.customer_approval_status || (isIa ? 'NONE' : 'PENDING')).toUpperCase();
+    const pQty = Number(p.quantity) || 1;
+    const insQty = Number(p.insurance_approved_qty) || 0;
+    const custQty = Number(p.customer_approved_qty) || 0;
+    const pendingQty = Math.max(0, pQty - insQty - custQty);
+    const isIa = insQty > 0;
     const isCrit = p.is_critical_to_start === 1;
     const cost = Number(p.total_cost || (p.quantity * (p.unit_cost || 0)));
 
@@ -6700,6 +7109,9 @@ function renderPaPartsTable(parts) {
       )
       : null;
 
+    const maxCustQty = pQty - insQty;
+
+    tr.dataset.qty = pQty;
     tr.innerHTML = `
       <td>
         <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
@@ -6710,22 +7122,19 @@ function renderPaPartsTable(parts) {
           ${matchedCatalog ? renderPartStockHoverPill(matchedCatalog) : ''}
         </div>
       </td>
-      <td style="text-align: center; font-weight: 700; font-family: var(--font-mono);">${p.quantity || 1}</td>
+      <td style="text-align: center; font-weight: 700; font-family: var(--font-mono);">${pQty}</td>
       <td style="font-family: var(--font-mono); font-weight: 600; color: #334155;">₹${cost.toLocaleString('en-IN')}</td>
       <td style="text-align: center;">
-        <label class="stage-part-checkbox" style="justify-content: center;">
-          <input type="checkbox" class="pa-row-ia-cb" ${isIa ? 'checked' : ''}>
-          <span>Insurance Approved</span>
-        </label>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+          <input type="number" class="pa-row-ia-qty form-input" style="width:56px;padding:2px 4px;font-size:12px;text-align:center;font-weight:700;" min="0" max="${pQty}" value="${insQty}">
+          <span style="font-size:10px;color:#64748b;">/ ${pQty}</span>
+        </div>
       </td>
-      <td>
-        <select class="form-input form-input-sm pa-row-ca-sel" style="font-size: 11px; padding: 3px 6px;">
-          <option value="NONE" ${custStatus === 'NONE' ? 'selected' : ''}>None (Claim Covered)</option>
-          <option value="PENDING" ${custStatus === 'PENDING' ? 'selected' : ''}>Pending (PCA)</option>
-          <option value="APPROVED" ${custStatus === 'APPROVED' ? 'selected' : ''}>Approved (CA)</option>
-          <option value="REJECTED" ${custStatus === 'REJECTED' ? 'selected' : ''}>Rejected (Do Not Order)</option>
-          <option value="EXEMPT" ${custStatus === 'EXEMPT' ? 'selected' : ''}>Exempt</option>
-        </select>
+      <td style="text-align: center;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+          <input type="number" class="pa-row-ca-qty form-input" style="width:56px;padding:2px 4px;font-size:12px;text-align:center;font-weight:700;" min="0" max="${maxCustQty}" value="${custQty}">
+          <span class="pa-row-cap-label" style="font-size:10px;font-weight:600;color:${pendingQty > 0 ? '#c2410c' : '#047857'};">${pendingQty > 0 ? `CAP: ${pendingQty}` : '✓ OK'}</span>
+        </div>
       </td>
       <td style="text-align: center;">
         <input type="checkbox" class="pa-row-crit-cb" ${isCrit ? 'checked' : ''} title="Critical to start repair work">
@@ -6740,25 +7149,38 @@ function renderPaPartsTable(parts) {
       </td>
     `;
 
-    // Interactive event listeners
-    const iaCb = tr.querySelector('.pa-row-ia-cb');
-    const caSel = tr.querySelector('.pa-row-ca-sel');
+    // Interactive event listeners for qty inputs
+    const iaQtyInp = tr.querySelector('.pa-row-ia-qty');
+    const caQtyInp = tr.querySelector('.pa-row-ca-qty');
 
-    if (iaCb && caSel) {
-      iaCb.addEventListener('change', () => {
-        if (iaCb.checked) {
-          caSel.value = 'NONE';
-        } else {
-          caSel.value = 'PENDING';
+    if (iaQtyInp && caQtyInp) {
+      iaQtyInp.addEventListener('change', () => {
+        const totalQ = Number(tr.dataset.qty) || 1;
+        const insV = Math.max(0, Math.min(totalQ, Number(iaQtyInp.value) || 0));
+        iaQtyInp.value = insV;
+        const maxCust = totalQ - insV;
+        caQtyInp.max = maxCust;
+        if (Number(caQtyInp.value) > maxCust) caQtyInp.value = maxCust;
+        const pending = totalQ - insV - Number(caQtyInp.value);
+        const capLabel = tr.querySelector('.pa-row-cap-label');
+        if (capLabel) {
+          capLabel.textContent = pending > 0 ? `CAP: ${pending}` : '\u2713 OK';
+          capLabel.style.color = pending > 0 ? '#c2410c' : '#047857';
         }
         updatePaLiveStats();
       });
 
-      caSel.addEventListener('change', () => {
-        if (caSel.value === 'NONE') {
-          iaCb.checked = true;
-        } else {
-          iaCb.checked = false;
+      caQtyInp.addEventListener('change', () => {
+        const totalQ = Number(tr.dataset.qty) || 1;
+        const insV = Number(iaQtyInp.value) || 0;
+        const maxCust = totalQ - insV;
+        const custV = Math.max(0, Math.min(maxCust, Number(caQtyInp.value) || 0));
+        caQtyInp.value = custV;
+        const pending = totalQ - insV - custV;
+        const capLabel = tr.querySelector('.pa-row-cap-label');
+        if (capLabel) {
+          capLabel.textContent = pending > 0 ? `CAP: ${pending}` : '\u2713 OK';
+          capLabel.style.color = pending > 0 ? '#c2410c' : '#047857';
         }
         updatePaLiveStats();
       });
@@ -6795,10 +7217,24 @@ function renderPaPartsTable(parts) {
 function setupPaNewPartAutocomplete() {
   const nameInput = document.getElementById('paNewPartName');
   const codeInput = document.getElementById('paNewPartCode');
+  const qtyInput = document.getElementById('paNewPartQty');
   const costInput = document.getElementById('paNewPartCost');
   const suggBox = document.getElementById('paNewPartSuggestions');
   const stockInfoEl = document.getElementById('paNewPartStockInfo');
   if (!nameInput || !suggBox) return;
+
+  // Reset inputs when modal opens
+  nameInput.value = '';
+  nameInput.dataset.selectedCode = '';
+  if (codeInput) codeInput.value = '';
+  if (qtyInput) qtyInput.value = '1';
+  if (costInput) costInput.value = '0';
+  if (stockInfoEl) stockInfoEl.innerHTML = '';
+  if (suggBox) suggBox.style.display = 'none';
+
+  // Guard against duplicate event listeners on subsequent modal opens
+  if (nameInput.dataset.paAutocompleteInit) return;
+  nameInput.dataset.paAutocompleteInit = 'true';
 
   async function showSuggestions(query) {
     try {
@@ -6817,67 +7253,56 @@ function setupPaNewPartAutocomplete() {
           const stockText = stockQty > 0 ? `x${stockQty} in stock` : 'Out of stock';
 
           let pVariants = [];
-            if (p.price_variants) {
-              try {
-                pVariants = typeof p.price_variants === 'string' ? JSON.parse(p.price_variants) : p.price_variants;
-              } catch (e) {}
-            }
-            pVariants = Array.isArray(pVariants) ? pVariants.filter(v => v && typeof v.price === 'number' && v.price > 0) : [];
+          if (p.price_variants) {
+            try {
+              pVariants = typeof p.price_variants === 'string' ? JSON.parse(p.price_variants) : p.price_variants;
+            } catch (e) { }
+          }
+          pVariants = Array.isArray(pVariants) ? pVariants.filter(v => v && typeof v.price === 'number' && v.price > 0) : [];
 
-            let priceHtml = `₹${Number(p.default_cost || 0).toLocaleString('en-IN')}`;
-            if (pVariants.length > 1) {
-              const prices = pVariants.map(v => v.price).sort((a, b) => a - b);
-              const minP = prices[0];
-              const maxP = prices[prices.length - 1];
-              if (minP !== maxP) {
-                priceHtml = `₹${minP.toLocaleString('en-IN')} - ₹${maxP.toLocaleString('en-IN')}`;
-              }
-              priceHtml += `<div style="font-size: 9.5px; color: #2563eb; font-weight: 700; margin-top: 1px;">${pVariants.length} batch prices</div>`;
+          // Suggested price: pick the higher price from batch
+          let higherPrice = Number(p.default_cost || 0);
+          if (pVariants.length > 0) {
+            const vPrices = pVariants.map(v => Number(v.price) || 0).filter(pr => pr > 0);
+            if (vPrices.length > 0) {
+              higherPrice = Math.max(...vPrices, higherPrice);
             }
+          }
 
-            item.innerHTML = `
+          let priceHtml = `₹${higherPrice.toLocaleString('en-IN')}`;
+
+          item.innerHTML = `
               <div class="part-sugg-left">
                 <div class="part-sugg-top">
                   <span class="part-sugg-code">${escapeHtml(p.part_code || 'NO SKU')}</span>
                   <span class="part-sugg-desc" title="${escapeHtml(p.part_name || '')}">${escapeHtml(p.part_name || '')}</span>
                 </div>
-                <div class="part-sugg-bottom">
-                  ${p.locators ? `<span class="part-sugg-loc">📍 ${escapeHtml(p.locators)}</span>` : '<span style="font-size:10px;color:#94a3b8;">No Locator</span>'}
-                </div>
               </div>
               <div class="part-sugg-right">
                 <div class="part-sugg-price">${priceHtml}</div>
-                <div class="part-sugg-stock ${stockClass}">${stockText}</div>
+                ${pVariants.length > 1 ? `<div style="font-size: 9px; color: #16a34a; font-weight: 600;">highest batch</div>` : ''}
               </div>
             `;
 
-            item.addEventListener('mousedown', (e) => {
-              e.preventDefault();
-              nameInput.value = p.part_name;
-              if (codeInput) codeInput.value = p.part_code || '';
-              if (costInput) costInput.value = p.default_cost || 0;
-              nameInput.dataset.selectedCode = p.part_code || '';
-              nameInput.classList.remove('is-invalid-catalog');
-              suggBox.style.display = 'none';
-              if (stockInfoEl) {
-                stockInfoEl.innerHTML = renderPartStockHoverPill(p, costInput ? costInput.value : null);
-                const pillWrap = stockInfoEl.querySelector('.part-stock-pill-wrap');
-                if (pillWrap) {
-                  pillWrap.style.cursor = 'pointer';
-                  pillWrap.addEventListener('click', (ev) => {
-                    ev.stopPropagation();
-                    openPartLocatorPicker({ qtyInput, costInput, nameInput, partCode: p.part_code, recalculateTotal: () => {} });
-                  });
-                }
-              }
-              openPartLocatorPicker({ qtyInput, costInput, nameInput, partCode: p.part_code, recalculateTotal: () => {} });
-            });
-            suggBox.appendChild(item);
+          item.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            nameInput.value = p.part_name;
+            if (codeInput) codeInput.value = p.part_code || '';
+            if (costInput) costInput.value = higherPrice;
+            nameInput.dataset.selectedCode = p.part_code || '';
+            suggBox.style.display = 'none';
+            if (stockInfoEl) stockInfoEl.innerHTML = '';
+            if (qtyInput) {
+              qtyInput.focus();
+              qtyInput.select();
+            }
           });
-        } else {
+          suggBox.appendChild(item);
+        });
+      } else if (clean) {
         suggBox.innerHTML = `
-          <div style="padding: 10px; font-size: 11px; color: #64748b; text-align: center;">
-            No parts found in catalog. Direct manual part creation is disabled.
+          <div style="padding: 8px 12px; font-size: 11px; color: #64748b; text-align: center;">
+            Press Tab to use "<strong>${escapeHtml(clean)}</strong>"
           </div>
         `;
       }
@@ -6899,20 +7324,6 @@ function setupPaNewPartAutocomplete() {
   nameInput.addEventListener('blur', () => {
     setTimeout(() => { suggBox.style.display = 'none'; }, 220);
   });
-
-  if (qtyInput) {
-    qtyInput.classList.add('part-row-qty-trigger');
-    qtyInput.title = 'Click to pick warehouse locators and batch stock';
-    qtyInput.addEventListener('click', () => {
-      openPartLocatorPicker({
-        qtyInput,
-        costInput,
-        nameInput,
-        partCode: codeInput ? codeInput.value : (nameInput ? nameInput.dataset.selectedCode : ''),
-        recalculateTotal: () => {}
-      });
-    });
-  }
 }
 
 async function handlePaAddPart() {
@@ -6999,27 +7410,35 @@ async function handlePaSave() {
   const partsUpdates = [];
   rows.forEach(r => {
     const partId = Number(r.dataset.partId);
-    const isIa = r.querySelector('.pa-row-ia-cb')?.checked ? 1 : 0;
-    const custStatus = r.querySelector('.pa-row-ca-sel')?.value || (isIa ? 'NONE' : 'PENDING');
+    const pQty = Number(r.dataset.qty) || 1;
+    const insQty = Math.max(0, Math.min(pQty, Number(r.querySelector('.pa-row-ia-qty')?.value) || 0));
+    const maxCustQty = pQty - insQty;
+    const custQty = Math.max(0, Math.min(maxCustQty, Number(r.querySelector('.pa-row-ca-qty')?.value) || 0));
     const isCrit = r.querySelector('.pa-row-crit-cb')?.checked ? 1 : 0;
+    const pendingQty = pQty - insQty - custQty;
+
+    let custStatus;
+    if (insQty >= pQty) custStatus = 'NONE';
+    else if (custQty >= maxCustQty) custStatus = 'APPROVED';
+    else custStatus = 'PENDING';
+
     partsUpdates.push({
       id: partId,
-      insurance_approved: isIa,
-      company_approved: isIa,
+      insurance_approved_qty: insQty,
+      customer_approved_qty: custQty,
+      insurance_approved: insQty > 0 ? 1 : 0,
+      company_approved: insQty > 0 ? 1 : 0,
       customer_approval_status: custStatus,
       is_critical_to_start: isCrit
     });
   });
-
-  const exempt = document.getElementById('paExemptCheckbox')?.checked ? 1 : 0;
 
   try {
     const res = await fetch(`/api/tickets/${state.currentPaTicketId}/parts-approval`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        parts: partsUpdates,
-        customerApprovalExempt: exempt
+        parts: partsUpdates
       })
     });
     if (!res.ok) {
@@ -7028,13 +7447,571 @@ async function handlePaSave() {
     }
 
     closeModal('modalPartsApproval');
-    showToast('✓ Parts approvals & exemptions saved', 'success');
+    showToast('✓ Parts approvals saved', 'success');
     await refreshTickets();
     if (state.mainView === 'ticket-detail' && state.currentEditingTicket && state.currentEditingTicket.id == state.currentPaTicketId) {
       await openTicketPage(state.currentPaTicketId);
     }
   } catch (err) {
     showToast(err.message, 'error');
+  }
+}
+
+// ====================================================
+// DEDICATED PCA APPROVAL CONTROLLER
+// ====================================================
+window.openPcaApprovalModal = async function (ticketId) {
+  try {
+    showGlobalLoader();
+    const res = await fetch(`/api/tickets/${ticketId}/parts-approval`);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to fetch parts for PCA resolution');
+    }
+    const data = await res.json();
+    const { ticket, parts } = data;
+
+    state.currentPcaTicketId = ticketId;
+    state.currentPcaTicket = ticket;
+    state.currentPcaParts = Array.isArray(parts) ? parts : [];
+
+    const titleEl = document.getElementById('pcaModalTitle');
+    if (titleEl) titleEl.textContent = `Resolve Pending Customer Approvals — Ticket #${ticket.ticket_number}`;
+
+    const subEl = document.getElementById('pcaModalSubtitle');
+    if (subEl) {
+      subEl.textContent = `${ticket.vehicle_no || ticket.model || 'Honda'} • ${ticket.customer_name || 'Customer'} (${ticket.customer_phone || '—'}) • Stage #${ticket.current_stage_id}`;
+    }
+
+    renderPcaPartsTable();
+    openModal('modalPcaResolution');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    hideGlobalLoader();
+  }
+};
+
+function renderPcaPartsTable() {
+  const tbody = document.getElementById('pcaPartsTableBody');
+  const countEl = document.getElementById('pcaModalPendingCount');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const pendingParts = (state.currentPcaParts || []).filter(p => {
+    const totalQ = Number(p.quantity) || 1;
+    const insQ = Number(p.insurance_approved_qty) || 0;
+    const custQ = Number(p.customer_approved_qty) || 0;
+    return (totalQ - insQ - custQ) > 0;
+  });
+
+  let totalPendingQty = 0;
+
+  if (pendingParts.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align: center; padding: 24px; color: #64748b;">
+          <div style="font-size: 13px; font-weight: 600;">✓ No pending customer approval items</div>
+          <div style="font-size: 11.5px; color: #94a3b8; margin-top: 3px;">All parts on this ticket are approved under insurance claim or customer authorization.</div>
+        </td>
+      </tr>
+    `;
+    if (countEl) countEl.textContent = '0 qty';
+    return;
+  }
+
+  pendingParts.forEach(p => {
+    const totalQ = Number(p.quantity) || 1;
+    const insQ = Number(p.insurance_approved_qty) || 0;
+    const custQ = Number(p.customer_approved_qty) || 0;
+    const pendingQ = Math.max(0, totalQ - insQ - custQ);
+    totalPendingQty += pendingQ;
+
+    const tr = document.createElement('tr');
+    tr.dataset.partId = p.id;
+    tr.dataset.pendingQty = pendingQ;
+
+    tr.innerHTML = `
+      <td>
+        <div style="font-weight: 600; color: #1e293b;">${escapeHtml(p.part_name)}</div>
+        ${p.part_code ? `<div style="font-size: 11px; color: #64748b; font-family: var(--font-mono);">${escapeHtml(p.part_code)}</div>` : ''}
+      </td>
+      <td style="text-align: center; font-weight: 700; font-family: var(--font-mono);">${totalQ}</td>
+      <td style="text-align: center; font-family: var(--font-mono); color: #047857;">${insQ}</td>
+      <td style="text-align: center; font-family: var(--font-mono); color: #6d28d9;">${custQ}</td>
+      <td style="text-align: center; font-weight: 800; font-family: var(--font-mono); color: #b45309; font-size: 13px;">${pendingQ}</td>
+      <td style="text-align: center;">
+        <div class="pca-decision-wrap" data-part-id="${p.id}" data-pending-qty="${pendingQ}">
+          <button type="button" class="pca-btn-choice pca-choice-cust active-cust" data-choice="CUST" title="Customer pays out-of-pocket (CA)">
+            👤 Customer Approval
+          </button>
+          <button type="button" class="pca-btn-choice pca-choice-claim" data-choice="CLAIM" title="Covered under Insurance Claim">
+            🛡️ Claim / Ins.
+          </button>
+          <input type="number" class="pca-split-qty-input form-input" min="1" max="${pendingQ}" value="${pendingQ}" title="Quantity to apply">
+        </div>
+      </td>
+    `;
+
+    // Toggle listener between Customer vs Claim
+    const custBtn = tr.querySelector('.pca-choice-cust');
+    const claimBtn = tr.querySelector('.pca-choice-claim');
+
+    if (custBtn && claimBtn) {
+      custBtn.addEventListener('click', () => {
+        custBtn.classList.add('active-cust');
+        claimBtn.classList.remove('active-claim');
+      });
+      claimBtn.addEventListener('click', () => {
+        claimBtn.classList.add('active-claim');
+        custBtn.classList.remove('active-cust');
+      });
+    }
+
+    tbody.appendChild(tr);
+  });
+
+  if (countEl) countEl.textContent = `${totalPendingQty} qty`;
+}
+
+async function handleSavePcaModal() {
+  if (!state.currentPcaTicketId) return;
+
+  const rows = document.querySelectorAll('#pcaPartsTableBody tr[data-part-id]');
+  if (rows.length === 0) {
+    closeModal('modalPcaResolution');
+    return;
+  }
+
+  const updates = [];
+  rows.forEach(tr => {
+    const partId = Number(tr.dataset.partId);
+    const p = (state.currentPcaParts || []).find(item => item.id === partId);
+    if (!p) return;
+
+    const wrap = tr.querySelector('.pca-decision-wrap');
+    const custBtn = wrap?.querySelector('.pca-choice-cust');
+    const isCust = custBtn?.classList.contains('active-cust');
+    const inp = wrap?.querySelector('.pca-split-qty-input');
+    const maxPending = Number(tr.dataset.pendingQty) || 1;
+    const applyQty = Math.max(1, Math.min(maxPending, Number(inp?.value) || maxPending));
+
+    if (isCust) {
+      const curCust = Number(p.customer_approved_qty) || 0;
+      const curIns = Number(p.insurance_approved_qty) || 0;
+      const newCust = curCust + applyQty;
+      const totalQ = Number(p.quantity) || 1;
+      const custStatus = (newCust + curIns >= totalQ) ? 'APPROVED' : 'PENDING';
+      updates.push({
+        id: partId,
+        customer_approved_qty: newCust,
+        customer_approval_status: custStatus
+      });
+    } else {
+      // Claim covered
+      const curIns = Number(p.insurance_approved_qty) || 0;
+      const newIns = curIns + applyQty;
+      updates.push({
+        id: partId,
+        insurance_approved_qty: newIns,
+        insurance_approved: 1,
+        company_approved: 1
+      });
+    }
+  });
+
+  if (updates.length === 0) {
+    closeModal('modalPcaResolution');
+    return;
+  }
+
+  try {
+    showGlobalLoader();
+    const res = await fetch(`/api/tickets/${state.currentPcaTicketId}/parts-approval`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parts: updates })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to apply approval decisions');
+    }
+
+    closeModal('modalPcaResolution');
+    showToast('✓ Customer & Claim approvals updated successfully', 'success');
+    await refreshTickets();
+    if (state.mainView === 'ticket-detail' && state.currentEditingTicket && state.currentEditingTicket.id == state.currentPcaTicketId) {
+      await openTicketPage(state.currentPcaTicketId);
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    hideGlobalLoader();
+  }
+}
+
+// ====================================================
+// DEDICATED CA PURCHASE & STOCK ALLOCATION CONTROLLER
+// ====================================================
+// ====================================================
+// DEDICATED CA PURCHASE & STOCK ALLOCATION CONTROLLER (2-STEP)
+// ====================================================
+window.openCaPurchaseModal = async function (ticketId) {
+  try {
+    showGlobalLoader();
+    const res = await fetch(`/api/tickets/${ticketId}/parts-approval`);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to fetch customer approved parts');
+    }
+    const data = await res.json();
+    const { ticket, parts } = data;
+
+    state.currentCaTicketId = ticketId;
+    state.currentCaTicket = ticket;
+
+    // Filter strictly for customer approved parts
+    state.currentCaParts = (Array.isArray(parts) ? parts : []).filter(p => {
+      const custQty = Number(p.customer_approved_qty) || 0;
+      const isCustAppr = (p.customer_approval_status || '').toUpperCase() === 'APPROVED';
+      const isNotIa = !(p.insurance_approved === 1 && (Number(p.insurance_approved_qty) || 0) >= (Number(p.quantity) || 1));
+      return custQty > 0 || (isCustAppr && isNotIa);
+    });
+
+    const titleEl = document.getElementById('caModalTitle');
+    if (titleEl) titleEl.textContent = `Order Customer Approved Parts — Ticket #${ticket.ticket_number}`;
+
+    const subEl = document.getElementById('caModalSubtitle');
+    if (subEl) {
+      subEl.textContent = `${ticket.vehicle_no || ticket.model || 'Honda'} • ${ticket.customer_name || 'Customer'} (${ticket.customer_phone || '—'}) • Stage #${ticket.current_stage_id}`;
+    }
+
+    goToCaStep1();
+    openModal('modalCaPurchase');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    hideGlobalLoader();
+  }
+};
+
+function goToCaStep1() {
+  const step1 = document.getElementById('caStep1Container');
+  const step2 = document.getElementById('caStep2Container');
+  const footer1 = document.getElementById('caFooterStep1');
+  const footer2 = document.getElementById('caFooterStep2');
+  const badge1 = document.getElementById('caStepBadge1');
+  const badge2 = document.getElementById('caStepBadge2');
+
+  if (step1) step1.style.display = 'block';
+  if (step2) step2.style.display = 'none';
+  if (footer1) footer1.style.display = 'flex';
+  if (footer2) footer2.style.display = 'none';
+  if (badge1) badge1.className = 'ca-step-badge active';
+  if (badge2) badge2.className = 'ca-step-badge';
+
+  renderCaStep1();
+}
+
+function renderCaStep1() {
+  const tbody = document.getElementById('caPartsTableBody');
+  const apprQtyEl = document.getElementById('caModalApprovedQty');
+  const inStockQtyEl = document.getElementById('caModalInStockQty');
+  const awaitingOrderQtyEl = document.getElementById('caModalAwaitingOrderQty');
+  const btnProceed = document.getElementById('btnCaProceedStep2');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const caParts = state.currentCaParts || [];
+
+  if (caParts.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="5" style="text-align: center; padding: 28px; color: #64748b;">
+          <div style="font-size: 13.5px; font-weight: 600;">No Customer Approved (CA) parts found</div>
+          <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">Only parts explicitly approved by the customer appear here for ordering.</div>
+        </td>
+      </tr>
+    `;
+    if (apprQtyEl) apprQtyEl.textContent = '0 qty';
+    if (inStockQtyEl) inStockQtyEl.textContent = '0 qty';
+    if (awaitingOrderQtyEl) awaitingOrderQtyEl.textContent = '0 qty';
+    if (btnProceed) btnProceed.disabled = true;
+    return;
+  }
+
+  if (btnProceed) btnProceed.disabled = false;
+
+  let totalApproved = 0;
+  let totalInStock = 0;
+  let totalBalance = 0;
+
+  caParts.forEach(p => {
+    const totalQ = Number(p.quantity) || 1;
+    const insQ = Number(p.insurance_approved_qty) || 0;
+    const caQty = Number(p.customer_approved_qty) || Math.max(1, totalQ - insQ);
+    totalApproved += caQty;
+
+    // Match inventory stock from state.parts
+    const matched = (state.parts && state.parts.length > 0)
+      ? state.parts.find(cp =>
+        (p.part_code && (cp.part_code || '').toLowerCase() === p.part_code.toLowerCase()) ||
+        (p.part_name && (cp.part_name || '').toLowerCase() === p.part_name.toLowerCase())
+      )
+      : null;
+
+    const stockQty = matched ? Number(matched.stock_qty || 0) : 0;
+    const rawLocators = p.picked_locators || p.locators || (matched ? matched.locators : '') || '';
+    const locators = formatLocatorsSummary(rawLocators);
+
+    // Cache on object for Step 2
+    p._caQty = caQty;
+    p._stockQty = stockQty;
+    p._locators = locators;
+    p._toOrderQty = caQty;
+
+    const inStockForThis = Math.min(caQty, stockQty);
+    totalInStock += inStockForThis;
+    totalBalance += Math.max(0, caQty - stockQty);
+
+    let recBadge = '';
+    if (stockQty >= caQty) {
+      recBadge = `<span class="badge-seg-status arrived" style="font-size: 10px; padding: 2px 7px;">In Stock (100%)</span>`;
+    } else if (stockQty > 0) {
+      recBadge = `<span class="badge-seg-status" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-size:10px; padding: 2px 7px;">Partial (${stockQty}/${caQty})</span>`;
+    } else {
+      recBadge = `<span class="badge-seg-status ordered" style="font-size: 10px; padding: 2px 7px;">Supplier Purchase</span>`;
+    }
+
+    const stockBadge = stockQty > 0
+      ? `<span class="ca-locator-pill" title="${locators ? `Locator: ${locators}` : 'Available in stock'}">📦 ${stockQty} in stock ${locators ? `(${escapeHtml(locators)})` : ''}</span>`
+      : `<span class="ca-locator-pill no-stock">0 in stock</span>`;
+
+    const tr = document.createElement('tr');
+    tr.dataset.partId = p.id;
+    tr.innerHTML = `
+      <td>
+        <div style="font-weight: 700; color: #0f172a;">${escapeHtml(p.part_name)}</div>
+        ${p.part_code ? `<div style="font-size: 11px; color: #64748b; font-family: var(--font-mono);">${escapeHtml(p.part_code)}</div>` : ''}
+      </td>
+      <td style="text-align: center; font-weight: 800; font-family: var(--font-mono); color: #6d28d9; font-size: 13.5px;">${caQty}</td>
+      <td style="text-align: center;">${stockBadge}</td>
+      <td style="text-align: center;">
+        <input type="number" class="ca-step1-procure-qty form-input" data-part-id="${p.id}" min="1" max="${caQty}" value="${caQty}">
+      </td>
+      <td style="text-align: center;">${recBadge}</td>
+    `;
+
+    const qtyInput = tr.querySelector('.ca-step1-procure-qty');
+    if (qtyInput) {
+      qtyInput.addEventListener('input', () => {
+        let val = parseInt(qtyInput.value) || 1;
+        if (val < 1) val = 1;
+        if (val > caQty) val = caQty;
+        qtyInput.value = val;
+        p._toOrderQty = val;
+      });
+    }
+
+    tbody.appendChild(tr);
+  });
+
+  if (apprQtyEl) apprQtyEl.textContent = `${totalApproved} qty`;
+  if (inStockQtyEl) inStockQtyEl.textContent = `${totalInStock} qty`;
+  if (awaitingOrderQtyEl) awaitingOrderQtyEl.textContent = `${totalBalance} qty`;
+}
+
+function goToCaStep2() {
+  const caParts = state.currentCaParts || [];
+  if (caParts.length === 0) {
+    showToast('No customer approved parts to fulfill', 'warning');
+    return;
+  }
+
+  const step1 = document.getElementById('caStep1Container');
+  const step2 = document.getElementById('caStep2Container');
+  const footer1 = document.getElementById('caFooterStep1');
+  const footer2 = document.getElementById('caFooterStep2');
+  const badge1 = document.getElementById('caStepBadge1');
+  const badge2 = document.getElementById('caStepBadge2');
+
+  if (step1) step1.style.display = 'none';
+  if (step2) step2.style.display = 'block';
+  if (footer1) footer1.style.display = 'none';
+  if (footer2) footer2.style.display = 'flex';
+  if (badge1) badge1.className = 'ca-step-badge completed';
+  if (badge2) badge2.className = 'ca-step-badge active';
+
+  renderCaStep2();
+}
+
+function renderCaStep2() {
+  const stockBody = document.getElementById('caStockSegmentList');
+  const purchaseBody = document.getElementById('caPurchaseSegmentList');
+  if (!stockBody || !purchaseBody) return;
+  stockBody.innerHTML = '';
+  purchaseBody.innerHTML = '';
+
+  const caParts = state.currentCaParts || [];
+
+  caParts.forEach(p => {
+    const neededQty = Number(p._toOrderQty) || Number(p._caQty) || 1;
+    const stockAvail = Number(p._stockQty) || 0;
+    const defaultStock = Math.min(neededQty, stockAvail);
+    const defaultPurchase = Math.max(0, neededQty - defaultStock);
+
+    p._takeFromStock = defaultStock;
+    p._purchaseQty = defaultPurchase;
+    const unitCost = Number(p.unit_cost) || 0;
+
+    // --- SEGMENT 1 ROW (STOCK) ---
+    const stockTr = document.createElement('tr');
+    stockTr.dataset.partId = p.id;
+    const stockBadge = stockAvail > 0
+      ? `<span class="ca-locator-pill">📦 ${stockAvail} available ${p._locators ? `(${escapeHtml(p._locators)})` : ''}</span>`
+      : `<span class="ca-locator-pill no-stock">0 in stock</span>`;
+
+    stockTr.innerHTML = `
+      <td>
+        <div style="font-weight: 700; color: #0f172a;">${escapeHtml(p.part_name)}</div>
+        <div style="font-size: 11px; color: #64748b;">Needed: <strong>${neededQty} pcs</strong></div>
+      </td>
+      <td style="text-align: center;">${stockBadge}</td>
+      <td style="text-align: center;">
+        <input type="number" class="ca-alloc-stock-input form-input" data-part-id="${p.id}" min="0" max="${Math.min(neededQty, stockAvail)}" value="${defaultStock}" ${stockAvail === 0 ? 'disabled' : ''}>
+      </td>
+    `;
+    stockBody.appendChild(stockTr);
+
+    // --- SEGMENT 2 ROW (PURCHASE) ---
+    const purchaseTr = document.createElement('tr');
+    purchaseTr.dataset.partId = p.id;
+    purchaseTr.innerHTML = `
+      <td>
+        <div style="font-weight: 700; color: #0f172a;">${escapeHtml(p.part_name)}</div>
+        <div style="font-size: 11px; color: #64748b;">Needed: <strong>${neededQty} pcs</strong></div>
+      </td>
+      <td style="text-align: center; font-family: var(--font-mono); font-weight: 600; color: #334155;">
+        ₹${unitCost.toLocaleString('en-IN')}
+      </td>
+      <td style="text-align: center;">
+        <input type="number" class="ca-alloc-purchase-input form-input" data-part-id="${p.id}" min="0" max="${neededQty}" value="${defaultPurchase}">
+      </td>
+    `;
+    purchaseBody.appendChild(purchaseTr);
+
+    // Dynamic two-way quantity sync
+    const stockInput = stockTr.querySelector('.ca-alloc-stock-input');
+    const purchaseInput = purchaseTr.querySelector('.ca-alloc-purchase-input');
+
+    if (stockInput && purchaseInput) {
+      stockInput.addEventListener('input', () => {
+        let sVal = parseInt(stockInput.value) || 0;
+        if (sVal < 0) sVal = 0;
+        const maxStock = Math.min(neededQty, stockAvail);
+        if (sVal > maxStock) sVal = maxStock;
+        stockInput.value = sVal;
+        p._takeFromStock = sVal;
+
+        // Auto-adjust purchase qty to fulfill the balance
+        const rem = Math.max(0, neededQty - sVal);
+        purchaseInput.value = rem;
+        p._purchaseQty = rem;
+
+        updateCaSplitSummary();
+      });
+
+      purchaseInput.addEventListener('input', () => {
+        let pVal = parseInt(purchaseInput.value) || 0;
+        if (pVal < 0) pVal = 0;
+        if (pVal > neededQty) pVal = neededQty;
+        purchaseInput.value = pVal;
+        p._purchaseQty = pVal;
+
+        updateCaSplitSummary();
+      });
+    }
+  });
+
+  updateCaSplitSummary();
+}
+
+function updateCaSplitSummary() {
+  const stockEl = document.getElementById('caSummaryStockTotal');
+  const purchaseEl = document.getElementById('caSummaryPurchaseTotal');
+  const costEl = document.getElementById('caSummaryPurchaseCost');
+  const caParts = state.currentCaParts || [];
+
+  let totalStock = 0;
+  let totalPurchase = 0;
+  let totalPurchaseCost = 0;
+
+  caParts.forEach(p => {
+    const s = Number(p._takeFromStock) || 0;
+    const pur = Number(p._purchaseQty) || 0;
+    const unitCost = Number(p.unit_cost) || 0;
+
+    totalStock += s;
+    totalPurchase += pur;
+    totalPurchaseCost += (pur * unitCost);
+  });
+
+  if (stockEl) stockEl.textContent = totalStock;
+  if (purchaseEl) purchaseEl.textContent = totalPurchase;
+  if (costEl) costEl.textContent = `₹${totalPurchaseCost.toLocaleString('en-IN')}`;
+}
+
+async function handleConfirmCaFulfillment() {
+  if (!state.currentCaTicketId) return;
+  const caParts = state.currentCaParts || [];
+
+  const allocations = caParts.map(p => ({
+    partId: p.id,
+    takeFromStockQty: Number(p._takeFromStock) || 0,
+    purchaseQty: Number(p._purchaseQty) || 0,
+    locators: p._locators || ''
+  })).filter(a => a.takeFromStockQty > 0 || a.purchaseQty > 0);
+
+  if (allocations.length === 0) {
+    showToast('Please allocate at least 1 quantity to stock or purchase', 'warning');
+    return;
+  }
+
+  try {
+    showGlobalLoader();
+    const res = await fetch(`/api/tickets/${state.currentCaTicketId}/ca-fulfill`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allocations })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to fulfill parts orders');
+    }
+
+    const data = await res.json();
+    let totalStock = 0;
+    let totalPur = 0;
+    allocations.forEach(a => {
+      totalStock += a.takeFromStockQty;
+      totalPur += a.purchaseQty;
+    });
+
+    closeModal('modalCaPurchase');
+    showToast(`✓ Ordering complete: ${totalStock} pcs allocated from stock (Arrived), ${totalPur} pcs ordered (Awaiting Delivery)`, 'success');
+
+    // Instantly reflect on PARTS Order Table & Kanban Board
+    await loadAndRenderPartsOrders();
+    await refreshTickets();
+
+    if (state.mainView === 'ticket-detail' && state.currentEditingTicket && state.currentEditingTicket.id == state.currentCaTicketId) {
+      await openTicketPage(state.currentCaTicketId);
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    hideGlobalLoader();
   }
 }
 
@@ -7373,12 +8350,12 @@ function handleRealtimeNotificationEvent(payload) {
     const notif = payload.new;
     const currentUserId = state.currentUser ? state.currentUser.id : null;
 
-    // Refresh the @n badge immediately
-    refreshAlertsBadge();
-
     if (payload.eventType === 'INSERT' && notif) {
-      // Check if this notification is for the current user
-      if (!notif.user_id || notif.user_id === currentUserId) {
+      // Check if this notification is strictly for the current authenticated user
+      if (currentUserId && String(notif.user_id) === String(currentUserId) && (!notif.actor_id || String(notif.actor_id) !== String(currentUserId))) {
+        // Refresh the @n badge immediately
+        refreshAlertsBadge();
+
         const actor = notif.actor_name || 'A teammate';
         const snippet = notif.content_snippet ? `"${notif.content_snippet}"` : '';
         const tktNum = notif.ticket_number ? `#${notif.ticket_number}` : 'a ticket';
@@ -8719,6 +9696,60 @@ function initSidebar() {
 
   const btnSavePa = document.getElementById('btnSavePartsApproval');
   if (btnSavePa) btnSavePa.addEventListener('click', handlePaSave);
+
+  // PCA Dedicated Modal Listeners
+  const btnClosePca = document.getElementById('btnClosePcaModal');
+  if (btnClosePca) btnClosePca.addEventListener('click', () => closeModal('modalPcaResolution'));
+
+  const btnCancelPca = document.getElementById('btnCancelPcaModal');
+  if (btnCancelPca) btnCancelPca.addEventListener('click', () => closeModal('modalPcaResolution'));
+
+  const btnPcaCustAll = document.getElementById('btnPcaApproveAllCustomer');
+  if (btnPcaCustAll) {
+    btnPcaCustAll.addEventListener('click', () => {
+      document.querySelectorAll('#pcaPartsTableBody .pca-decision-wrap').forEach(wrap => {
+        const custBtn = wrap.querySelector('.pca-choice-cust');
+        const claimBtn = wrap.querySelector('.pca-choice-claim');
+        if (custBtn && claimBtn) {
+          custBtn.classList.add('active-cust');
+          claimBtn.classList.remove('active-claim');
+        }
+      });
+    });
+  }
+
+  const btnPcaClaimAll = document.getElementById('btnPcaCoverAllClaim');
+  if (btnPcaClaimAll) {
+    btnPcaClaimAll.addEventListener('click', () => {
+      document.querySelectorAll('#pcaPartsTableBody .pca-decision-wrap').forEach(wrap => {
+        const custBtn = wrap.querySelector('.pca-choice-cust');
+        const claimBtn = wrap.querySelector('.pca-choice-claim');
+        if (custBtn && claimBtn) {
+          claimBtn.classList.add('active-claim');
+          custBtn.classList.remove('active-cust');
+        }
+      });
+    });
+  }
+
+  const btnSavePca = document.getElementById('btnSavePcaModal');
+  if (btnSavePca) btnSavePca.addEventListener('click', handleSavePcaModal);
+
+  // CA Dedicated 2-Step Ordering Modal Listeners
+  const btnCloseCa = document.getElementById('btnCloseCaModal');
+  if (btnCloseCa) btnCloseCa.addEventListener('click', () => closeModal('modalCaPurchase'));
+
+  const btnCancelCa = document.getElementById('btnCancelCaModal');
+  if (btnCancelCa) btnCancelCa.addEventListener('click', () => closeModal('modalCaPurchase'));
+
+  const btnCaProceed = document.getElementById('btnCaProceedStep2');
+  if (btnCaProceed) btnCaProceed.addEventListener('click', goToCaStep2);
+
+  const btnCaBack = document.getElementById('btnCaBackStep1');
+  if (btnCaBack) btnCaBack.addEventListener('click', goToCaStep1);
+
+  const btnCaConfirm = document.getElementById('btnCaConfirmFulfill');
+  if (btnCaConfirm) btnCaConfirm.addEventListener('click', handleConfirmCaFulfillment);
 
   const formAddPart = document.getElementById('formAddPartMaster');
   if (formAddPart) {
@@ -11553,7 +12584,7 @@ async function loadAndRenderPartsOrders() {
 
     orders.forEach(o => {
       const isArrived = (o.part_status || '').toUpperCase() === 'ARRIVED';
-      const isOrdered = (o.part_status || '').toUpperCase() === 'ORDERED' && Number(o.current_stage_id) >= 6;
+      const isOrdered = (o.part_status || '').toUpperCase() === 'ORDERED' && (Number(o.current_stage_id) >= 6 || (o.customer_approval_status || '').toUpperCase() === 'APPROVED' || o.insurance_approved === 1);
       const isIa = o.insurance_approved === 1 || o.company_approved === 1;
       const custStatus = (o.customer_approval_status || '').toUpperCase();
       const isAfterApproval = Number(o.current_stage_id) > 5;
@@ -11678,24 +12709,20 @@ function renderPartsOrdersTable(orders) {
     const tr = document.createElement('tr');
 
     const isArrived = (o.part_status || '').toUpperCase() === 'ARRIVED';
-    const isOrdered = (o.part_status || '').toUpperCase() === 'ORDERED' && Number(o.current_stage_id) >= 6;
+    const isOrdered = (o.part_status || '').toUpperCase() === 'ORDERED' && (Number(o.current_stage_id) >= 6 || (o.customer_approval_status || '').toUpperCase() === 'APPROVED' || o.insurance_approved === 1);
     const isHold = (o.part_status || '').toUpperCase() === 'ON_HOLD';
     const isIa = o.insurance_approved === 1 || o.company_approved === 1;
     const custStatus = (o.customer_approval_status || '').toUpperCase();
     const isOrderAfterApproval = Number(o.current_stage_id) > 5;
-    const isExempt = (o.customer_approval_exempt === 1 || custStatus === 'EXEMPT') && isOrderAfterApproval;
-
     let approvalBadge = '';
     if (isIa) {
       approvalBadge = `<span class="tag-part-lifecycle tag-ia" onclick="openPartsApprovalModal(${o.ticket_id})" title="Insurance Approved">Insurance Approved</span>`;
     } else if (!isOrderAfterApproval) {
       approvalBadge = `<span class="tag-part-lifecycle" onclick="openPartsApprovalModal(${o.ticket_id})" style="background:#f8fafc; color:#64748b; border: 1px solid #cbd5e1;" title="Estimate / Awaiting Surveyor Approval">Awaiting Approval</span>`;
     } else if (custStatus === 'APPROVED') {
-      approvalBadge = `<span class="tag-part-lifecycle tag-ca" onclick="openPartsApprovalModal(${o.ticket_id})" title="Customer Approved">Customer Approved</span>`;
-    } else if (isExempt) {
-      approvalBadge = `<span class="tag-part-lifecycle tag-exempt" onclick="openPartsApprovalModal(${o.ticket_id})" title="Workshop Exemption Active">Exempt</span>`;
+      approvalBadge = `<span class="tag-part-lifecycle tag-ca" onclick="openCaPurchaseModal(${o.ticket_id})" title="Customer Approved. Click to purchase or allocate stock.">Customer Approved</span>`;
     } else {
-      approvalBadge = `<span class="tag-part-lifecycle tag-pca" onclick="openPartsApprovalModal(${o.ticket_id})" title="Pending Customer Approval">Pending Cust. (PCA)</span>`;
+      approvalBadge = `<span class="tag-part-lifecycle tag-pca" onclick="openPcaApprovalModal(${o.ticket_id})" title="Pending Customer Approval. Click to choose Customer Approval or Claim.">Pending Cust. (PCA)</span>`;
     }
 
     const statusBadge = isArrived

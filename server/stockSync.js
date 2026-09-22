@@ -238,13 +238,44 @@ async function ingestStockSnapshot(pool, bufferOrParsed, options = {}) {
   try {
     await client.query('BEGIN');
 
-    // 1. Replace physical stock entries with the new day's physical count
+    // Fetch all authoritative SKUs from parts_master
+    const masterRes = await client.query('SELECT sku FROM parts_master;');
+    const validSkuSet = new Set(masterRes.rows.map(r => (r.sku || '').trim().toUpperCase()));
+
+    // Filter physical stock entries: only accept items that exist in parts_master
+    const acceptedEntries = [];
+    const rejectedSkusMap = new Map();
+
+    for (const row of entries) {
+      const normSku = (row.part_number || '').trim().toUpperCase();
+      if (validSkuSet.has(normSku)) {
+        acceptedEntries.push(row);
+      } else {
+        if (!rejectedSkusMap.has(normSku)) {
+          rejectedSkusMap.set(normSku, {
+            sku: row.part_number,
+            description: row.description || '',
+            quantity: row.quantity || 0,
+            unit_price: row.unit_price || 0,
+            locator: [row.locator_1, row.locator_2].filter(Boolean).join(' / ') || '—',
+            reason: 'SKU not found in parts_master'
+          });
+        } else {
+          const existing = rejectedSkusMap.get(normSku);
+          existing.quantity += (row.quantity || 0);
+        }
+      }
+    }
+
+    const rejectedSkus = Array.from(rejectedSkusMap.values());
+
+    // 1. Replace physical stock entries with the accepted count
     await client.query('TRUNCATE TABLE physical_stock_entries;');
 
-    // Insert entries in chunks of 500 rows for high performance
+    // Insert accepted entries in chunks of 500 rows for high performance
     const chunkSize = 500;
-    for (let i = 0; i < entries.length; i += chunkSize) {
-      const chunk = entries.slice(i, i + chunkSize);
+    for (let i = 0; i < acceptedEntries.length; i += chunkSize) {
+      const chunk = acceptedEntries.slice(i, i + chunkSize);
       const valueStrings = [];
       const params = [];
       let pIdx = 1;
@@ -271,12 +302,37 @@ async function ingestStockSnapshot(pool, bufferOrParsed, options = {}) {
       await client.query(insertSql, params);
     }
 
-    // 2. Prepare grouped parts for parts master table
+    // 2. Prepare grouped parts for parts master table from accepted entries only
+    const acceptedGroupedMap = new Map();
+    for (const item of acceptedEntries) {
+      const partNo = item.part_number;
+      if (!acceptedGroupedMap.has(partNo)) {
+        acceptedGroupedMap.set(partNo, {
+          part_code: partNo,
+          part_name: item.description || partNo,
+          stock_qty: 0,
+          latest_price: 0,
+          prices: new Map(),
+          locators: new Set(),
+          batches: []
+        });
+      }
+      const pGroup = acceptedGroupedMap.get(partNo);
+      pGroup.stock_qty += item.quantity;
+      if (item.unit_price > 0) {
+        pGroup.latest_price = item.unit_price;
+        pGroup.prices.set(item.unit_price, (pGroup.prices.get(item.unit_price) || 0) + item.quantity);
+      }
+      if (item.locator_1 && item.locator_1 !== '0' && item.locator_1 !== '-') pGroup.locators.add(item.locator_1);
+      if (item.locator_2 && item.locator_2 !== '0' && item.locator_2 !== '-') pGroup.locators.add(item.locator_2);
+      pGroup.batches.push(item);
+    }
+
     const groupedList = [];
     let inStockCount = 0;
     let totalQuantity = 0;
 
-    for (const [partCode, g] of groupedMap.entries()) {
+    for (const [partCode, g] of acceptedGroupedMap.entries()) {
       if (g.stock_qty > 0) inStockCount++;
       totalQuantity += g.stock_qty;
 
@@ -295,10 +351,20 @@ async function ingestStockSnapshot(pool, bufferOrParsed, options = {}) {
         });
       }
 
-      // Determine default cost: latest non-zero price or average
-      let defaultCost = g.latest_price;
+      // Determine default cost (suggested price for estimation): higher price from batch
+      let maxBatchPrice = 0;
+      for (const pPrice of g.prices.keys()) {
+        const numPrice = Number(pPrice) || 0;
+        if (numPrice > maxBatchPrice) {
+          maxBatchPrice = numPrice;
+        }
+      }
+      let defaultCost = maxBatchPrice > 0 ? maxBatchPrice : (g.latest_price || 0);
       if (!defaultCost && variants.length > 0) {
-        defaultCost = variants[0].price;
+        const validVariantPrices = variants.map(v => Number(v.price) || 0).filter(p => p > 0);
+        if (validVariantPrices.length > 0) {
+          defaultCost = Math.max(...validVariantPrices);
+        }
       }
 
       groupedList.push({
@@ -338,7 +404,7 @@ async function ingestStockSnapshot(pool, bufferOrParsed, options = {}) {
         ON CONFLICT (part_code) WHERE part_code IS NOT NULL AND part_code != ''
         DO UPDATE SET
           part_name = EXCLUDED.part_name,
-          default_cost = CASE WHEN EXCLUDED.default_cost > 0 THEN EXCLUDED.default_cost ELSE parts.default_cost END,
+          default_cost = CASE WHEN EXCLUDED.default_cost > 0 THEN GREATEST(COALESCE(parts.default_cost, 0), EXCLUDED.default_cost) ELSE parts.default_cost END,
           stock_qty = EXCLUDED.stock_qty,
           locators = EXCLUDED.locators,
           price_variants = EXCLUDED.price_variants;
@@ -362,6 +428,9 @@ async function ingestStockSnapshot(pool, bufferOrParsed, options = {}) {
       batchId,
       filename,
       totalRows: entries.length,
+      acceptedRows: acceptedEntries.length,
+      rejectedCount: rejectedSkus.length,
+      rejectedSkus,
       uniqueParts: groupedList.length,
       inStockParts: inStockCount,
       totalQuantity,

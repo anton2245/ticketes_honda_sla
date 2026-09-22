@@ -51,6 +51,18 @@
   scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
 }
 
+/* Remove default number input spinner arrows (stepper buttons) from all forms */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none !important;
+  margin: 0 !important;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield !important;
+  appearance: textfield !important;
+}
+
 /* ==================================================== */
 /* SLEEK & SIMPLE MINIMALIST SCROLLBARS */
 /* ==================================================== */
@@ -1709,35 +1721,51 @@ select option, .form-select option {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(15, 23, 42, 0.5);
+  background-color: rgba(15, 23, 42, 0.55);
   backdrop-filter: blur(4px);
   z-index: 10000;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 16px;
+  overflow-y: auto;
 }
 
 .modal,
 .modal-card {
   background-color: #ffffff;
   border-radius: 12px;
-  box-shadow: 0 20px 30px -5px rgba(15, 23, 42, 0.15), 0 8px 12px -6px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 20px 30px -5px rgba(15, 23, 42, 0.2), 0 8px 16px -6px rgba(15, 23, 42, 0.12);
   width: 100%;
-  max-height: 92vh;
+  max-height: min(92vh, calc(100vh - 32px));
   display: flex;
   flex-direction: column;
   border: 1px solid #e2e8f0;
-  overflow: visible; /* Prevents clipping dropdowns & suggestion boxes */
+  overflow: hidden; /* Strictly contains modal content inside viewport */
   position: relative;
   z-index: 10001;
   animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  margin: auto;
+}
+
+.modal > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .modal-sm { max-width: 480px; }
 .modal-md { max-width: 660px; }
 .modal-lg { max-width: 860px; }
 .modal-xl { max-width: 1000px; }
+
+/* Dedicated sizing for Stage Advance Modal */
+#modalAdvanceStage .modal {
+  max-width: min(780px, 96vw);
+  max-height: min(92vh, 880px);
+}
 
 .modal-title-wrap {
   display: flex;
@@ -1762,7 +1790,7 @@ select option, .form-select option {
 }
 
 .modal-header {
-  padding: 18px 24px;
+  padding: 16px 22px;
   border-bottom: 1px solid var(--border-light);
   display: flex;
   align-items: center;
@@ -1772,6 +1800,7 @@ select option, .form-select option {
   border-top-right-radius: 12px;
   position: relative;
   z-index: 2;
+  flex-shrink: 0;
 }
 
 .modal-header h3 {
@@ -1804,31 +1833,44 @@ select option, .form-select option {
 }
 
 .modal-body {
-  padding: 20px 24px;
-  overflow: visible;
+  padding: 18px 22px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   position: relative;
-  z-index: 10;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
 }
 
-/* Enable scrolling only for designated scrollable modals like EOD report */
-.modal-scrollable .modal-body,
-#modalEodReport .modal-body {
-  overflow-y: auto;
-  max-height: calc(85vh - 140px);
+/* Smooth unobtrusive scrollbar for modal-body */
+.modal-body::-webkit-scrollbar {
+  width: 6px;
+}
+.modal-body::-webkit-scrollbar-track {
+  background: #f8fafc;
+}
+.modal-body::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 .modal-footer {
-  padding: 14px 24px;
+  padding: 14px 22px;
   border-top: 1px solid var(--border-light);
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
   background-color: #ffffff;
-  border-bottom-left-radius: var(--radius-md);
-  border-bottom-right-radius: var(--radius-md);
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
   position: relative;
-  z-index: 1;
+  z-index: 2;
+  flex-shrink: 0;
 }
 
 /* 2-COLUMN MODAL FORM GRID */
@@ -10550,14 +10592,6 @@ button:disabled, .btn:disabled, .btn[disabled] {
   border-color: #10b981;
 }
 
-/* Exempt Tag */
-.tag-exempt {
-  background-color: #f1f5f9;
-  color: #475569;
-  border-color: #cbd5e1;
-  font-style: italic;
-}
-
 /* Modal Parts Approval Stats Ribbon */
 .pa-stats-ribbon {
   display: flex;
@@ -10604,243 +10638,901 @@ button:disabled, .btn:disabled, .btn[disabled] {
 .pa-stat-chip.arrived { background-color: #f0fdf4; border-color: #bbf7d0; color: #166534; }
 .pa-stat-chip.arrived .val { color: #15803d; }
 
-/* Exemption Card in Modal */
-.pa-exemption-card {
-  padding: 10px 14px;
-  background-color: #fffbeb;
-  border: 1px solid #fef3c7;
-  border-radius: 8px;
-  margin-bottom: 12px;
-}
-
-.pa-checkbox-label {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.pa-checkbox-label input[type="checkbox"] {
-  margin-top: 3px;
-  width: 16px;
-  height: 16px;
-  accent-color: #d97706;
-  cursor: pointer;
-}
-
-.pa-exemption-info .title {
-  display: block;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #92400e;
-}
-
-.pa-exemption-info .desc {
-  display: block;
-  font-size: 11px;
-  color: #b45309;
-  margin-top: 2px;
-  line-height: 1.4;
-}
-
-/* Stage 5 Advance Checklist styling */
-.stage-advance-parts-approval-card {
-  margin-top: 12px;
-  padding: 12px 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #f8fafc;
-}
-
-.stage-advance-parts-approval-card .header-title {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #1e293b;
-  margin-bottom: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.stage-advance-parts-approval-card .subtext {
-  font-size: 11px;
-  color: #64748b;
-  margin-bottom: 10px;
-}
-
-.stage-parts-checklist {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 240px;
-  overflow-y: auto;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 6px;
-}
-
-.stage-part-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  border-radius: 5px;
-  background: #fafafa;
-  border: 1px solid #f1f5f9;
-  font-size: 12px;
-}
-
-.stage-part-row:hover {
-  background: #f1f5f9;
-}
-
-.stage-part-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.stage-part-name {
-  font-weight: 600;
-  color: #1e293b;
-}
-
-.stage-part-cost {
-  font-size: 11px;
-  color: #64748b;
-}
-
-.stage-part-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #047857;
-  cursor: pointer;
-}
-
-.stage-part-checkbox input[type="checkbox"] {
-  width: 15px;
-  height: 15px;
-  accent-color: #059669;
-  cursor: pointer;
-}
-
 /* ==================================================== */
-/* STAGE 6 ADVANCE: PARTS ORDER BREAKDOWN & CRITICAL LABEL */
+/* STAGE 5 ADVANCE & APPROVAL FORM MODAL STYLING        */
 /* ==================================================== */
-.stage-advance-parts-order-card {
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 12px;
-}
-
-.stage-advance-parts-order-card .header-title {
+.stage5-confirmation-banner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-size: 13px;
-  font-weight: 700;
-  color: #1e293b;
-  margin-bottom: 4px;
-}
-
-.stage-parts-order-checklist {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 280px;
-  overflow-y: auto;
-  padding: 4px 2px;
-  margin-top: 8px;
-}
-
-.stage-part-order-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  padding: 8px 12px;
-  border-radius: 6px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+}
+
+.stage5-confirmation-banner .banner-badge {
+  background: #059669;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.stage5-confirmation-banner .banner-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: #065f46;
+}
+
+.stage5-approval-hero-card {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
   background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.stage5-hero-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.hero-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hero-icon-shield {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #dcfce7;
+  color: #166534;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.hero-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+}
+
+.hero-subtitle {
+  font-size: 11.5px;
+  color: #64748b;
+  margin-top: 1px;
+}
+
+/* Stats Ribbon Grid */
+.stage5-stats-ribbon {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding: 12px 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.stage5-stat-card {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  transition: all 0.15s ease;
+}
+
+.stage5-stat-card.ins-approved {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.stage5-stat-card.ins-approved .stat-label {
+  color: #166534;
+}
+
+.stage5-stat-card.ins-approved .stat-val {
+  color: #15803d;
+}
+
+.stage5-stat-card.cap-pending {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.stage5-stat-card.cap-pending .stat-label {
+  color: #9a3412;
+}
+
+.stage5-stat-card.cap-pending .stat-val {
+  color: #c2410c;
+}
+
+.stage5-stat-card.total-summary {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.stage5-stat-card .stat-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+}
+
+.stage5-stat-card .stat-val {
+  font-size: 16px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.stage5-stat-card .stat-unit {
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.stage5-stat-card .stat-subtext {
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  margin-top: 2px;
+}
+
+/* Parts List */
+.stage5-parts-list {
+  padding: 10px 14px;
+  max-height: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #ffffff;
+  border: none;
+  overflow-y: auto;
+}
+
+.stage5-part-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #f8fafc;
   border: 1px solid #e2e8f0;
   transition: all 0.15s ease;
 }
 
-.stage-part-order-row:hover {
-  background: #f8fafc;
+.stage5-part-row:hover {
+  background: #f1f5f9;
   border-color: #cbd5e1;
 }
 
-.stage-part-order-row.row-not-ordered {
-  opacity: 0.6;
+.stage-part-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stage-part-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.stage-part-code-badge {
+  font-size: 10.5px;
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  color: #475569;
+  background: #e2e8f0;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.stage-part-cost-details {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.stage-part-cost-details .bullet {
+  color: #cbd5e1;
+}
+
+.stage-part-cost-details .total-price-tag {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.stage5-part-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.stage5-qty-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.qty-control-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.qty-stepper-wrap {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.btn-qty-step {
+  border: none;
   background: #f1f5f9;
-}
-
-.stage-part-order-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-}
-
-.stage-part-order-left input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  accent-color: #2563eb;
+  color: #334155;
+  width: 26px;
+  height: 28px;
+  font-size: 14px;
+  font-weight: 700;
   cursor: pointer;
-}
-
-.stage-part-order-badges {
   display: flex;
   align-items: center;
+  justify-content: center;
+  transition: background 0.1s ease;
+  user-select: none;
+}
+
+.btn-qty-step:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.btn-qty-step:active {
+  background: #cbd5e1;
+}
+
+.adv-part-ia-qty.form-input {
+  width: 44px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-left: 1px solid #e2e8f0;
+  border-right: 1px solid #e2e8f0;
+  border-radius: 0;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+  background: #ffffff;
+}
+
+.adv-part-ia-qty.form-input:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1px #0284c7;
+}
+
+.qty-total-denom {
+  font-size: 11.5px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.stage5-part-status-badge {
+  min-width: 130px;
+  text-align: right;
+}
+
+.adv-part-cap-label {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 5px;
+  transition: all 0.15s ease;
+}
+
+.adv-part-cap-label.cap-covered {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.adv-part-cap-label.cap-active {
+  background: #ffedd5;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+}
+
+/* ==================================================== */
+/* STAGE 6 ADVANCE: MODERN PROCUREMENT & PARTS ORDER    */
+/* ==================================================== */
+
+.stage6-order-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+}
+
+.stage6-order-banner .banner-badge {
+  background: #059669;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.stage6-order-banner .banner-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: #065f46;
+  flex: 1;
+}
+
+.stage6-order-banner .banner-sla {
+  font-size: 11px;
+  font-weight: 700;
+  color: #047857;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  padding: 2px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.stage6-procurement-hero-card {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+/* KPI Ribbon */
+.stage6-stats-ribbon {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding: 10px 14px;
+  background: #ffffff;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.stage6-stat-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.stage6-stat-card.total-needed {
+  border-left: 3px solid #64748b;
+}
+
+.stage6-stat-card.from-stock {
+  border-left: 3px solid #10b981;
+  background: #f0fdf4;
+}
+
+.stage6-stat-card.to-order {
+  border-left: 3px solid #3b82f6;
+  background: #eff6ff;
+}
+
+.stage6-stat-card.critical-flag {
+  border-left: 3px solid #ef4444;
+  background: #fef2f2;
+}
+
+.stage6-stat-card .stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: #64748b;
+  margin-bottom: 2px;
+}
+
+.stage6-stat-card .stat-val {
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+  font-family: var(--font-mono);
+}
+
+.stage6-stat-card .stat-unit {
+  font-size: 10px;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.stage6-stat-card .stat-subtext {
+  font-size: 9.5px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.stage6-stat-card.from-stock .stat-val { color: #047857; }
+.stage6-stat-card.to-order .stat-val { color: #1d4ed8; }
+.stage6-stat-card.critical-flag .stat-val { color: #b91c1c; }
+
+/* Quick Bar */
+.stage6-quick-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 12px;
+}
+
+.stage6-quick-bar .quick-bar-label {
+  font-weight: 600;
+  color: #475569;
+}
+
+.stage6-quick-bar .quick-btn-group {
+  display: flex;
   gap: 6px;
   flex-wrap: wrap;
 }
 
-.stage-part-order-right {
+.stage6-quick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.stage6-quick-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.stage6-quick-btn.active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.1);
+}
+
+/* Parts Checklist & Card Rows */
+.stage6-parts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 10px 14px;
+  background: #f8fafc;
+}
+
+.stage6-part-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: all 0.15s ease;
+}
+
+.stage6-part-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.stage6-part-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.stage6-part-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.stage6-part-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.3;
+}
+
+.stage6-part-sku {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+
+.stage6-part-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
 }
 
-.stage-part-critical-label {
+.stage6-part-mid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid #f8fafc;
+  border-bottom: 1px solid #f8fafc;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.stage6-part-specs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.stage6-part-specs .spec-cost {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.stage6-part-specs .spec-dot {
+  color: #cbd5e1;
+}
+
+.stage6-stock-tag {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-size: 11px;
   font-weight: 600;
-  color: #991b1b;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.stage6-stock-tag.in-stock {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.stage6-stock-tag.out-of-stock {
   background: #fef2f2;
+  color: #b91c1c;
   border: 1px solid #fecaca;
+}
+
+.stage6-stock-tag .stock-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.stage6-stock-tag .stock-dot.in { background: #16a34a; }
+.stage6-stock-tag .stock-dot.out { background: #dc2626; }
+
+.stage6-stock-tag .stock-loc-pill {
+  font-weight: 500;
+  color: #047857;
+  font-size: 10.5px;
+  margin-left: 2px;
+  padding-left: 4px;
+  border-left: 1px solid #86efac;
+}
+
+.stage6-part-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #f8fafc;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #f1f5f9;
+}
+
+.stage6-stepper-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stage6-stepper-control .stepper-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.stage6-stepper {
+  display: inline-flex;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.btn-stage6-step {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+
+.btn-stage6-step:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.stage6-stepper-input {
+  width: 44px;
+  height: 26px;
+  padding: 0;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: #0f172a;
+  border: none;
+  background: transparent;
+  outline: none;
+}
+
+.stage6-fulfillment-chip {
+  flex: 1;
+  min-width: 140px;
+  text-align: center;
+}
+
+.stage6-chip-ready {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
   padding: 3px 8px;
+  border-radius: 12px;
+}
+
+.stage6-chip-split {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.stage6-chip-split .chip-stock {
+  color: #047857;
+  background: #ecfdf5;
+  padding: 2px 6px;
   border-radius: 4px;
+  border: 1px solid #d1fae5;
+}
+
+.stage6-chip-split .chip-order {
+  color: #1d4ed8;
+  background: #eff6ff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #dbeafe;
+}
+
+.stage6-chip-order {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 3px 8px;
+  border-radius: 12px;
+}
+
+.stage6-chip-stock {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #047857;
+}
+
+.stage6-critical-flag {
+  flex-shrink: 0;
+}
+
+.stage6-critical-cb-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #64748b;
   cursor: pointer;
   transition: all 0.15s ease;
+  user-select: none;
 }
 
-.stage-part-critical-label:hover {
-  background: #fee2e2;
+.stage6-critical-cb-label:hover {
+  border-color: #cbd5e1;
+  color: #334155;
+  background: #f8fafc;
 }
 
-.stage-part-critical-label input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
+.stage6-critical-cb-label.is-critical {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.stage6-critical-cb-label input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
   accent-color: #dc2626;
   cursor: pointer;
 }
 
-.adv-order-subtext {
-  font-size: 11.5px;
-  color: #64748b;
-  line-height: 1.4;
+/* Extra Parts Card */
+.stage6-extra-parts-card {
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  transition: all 0.15s ease;
+}
+
+.stage6-extra-parts-card:hover {
+  border-color: #94a3b8;
+}
+
+.stage6-extra-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stage6-extra-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stage6-extra-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #e2e8f0;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.stage6-extra-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge-extra-count {
+  font-size: 10px;
+  font-weight: 700;
+  background: #2563eb;
+  color: #ffffff;
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+.stage6-extra-desc {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* Form fields grid */
+.stage6-form-fields-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+
+@media (max-width: 640px) {
+  .stage6-stats-ribbon {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .stage6-part-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .stage6-form-fields-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ==========================================================================
@@ -11363,3 +12055,416 @@ button:disabled, .btn:disabled, .btn[disabled] {
   text-transform: uppercase;
   margin-top: 2px;
 }
+
+/* ==================================================== */
+/* DEDICATED PCA RESOLUTION & CA PURCHASE MODAL STYLES  */
+/* ==================================================== */
+
+/* PCA Quick Actions Ribbon */
+.pca-quick-actions-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.pca-summary-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.pca-summary-stat .label {
+  color: #92400e;
+  font-weight: 600;
+}
+
+.pca-summary-stat .val {
+  font-weight: 800;
+  color: #b45309;
+  font-family: var(--font-mono);
+}
+
+/* PCA Decision Segmented Controls */
+.pca-decision-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+}
+
+.pca-btn-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.pca-btn-choice:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.pca-btn-choice.active-cust {
+  background: #f5f3ff;
+  border-color: #8b5cf6;
+  color: #6d28d9;
+  box-shadow: 0 1px 3px rgba(139, 92, 246, 0.2);
+}
+
+.pca-btn-choice.active-claim {
+  background: #ecfdf5;
+  border-color: #10b981;
+  color: #047857;
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.2);
+}
+
+.pca-split-qty-input {
+  width: 50px;
+  padding: 3px 4px;
+  font-size: 11.5px;
+  text-align: center;
+  font-weight: 700;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+}
+
+/* CA Purchase Modal Ribbon */
+.ca-purchase-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.ca-stat-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  font-weight: 500;
+}
+
+.ca-stat-item .val {
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: #0f172a;
+}
+
+.ca-stat-item.in-stock {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+.ca-stat-item.in-stock .val {
+  color: #047857;
+}
+
+.ca-stat-item.pending {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1e40af;
+}
+
+.ca-stat-item.pending .val {
+  color: #2563eb;
+}
+
+/* Stock & Locator pill in CA table */
+.ca-locator-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #15803d;
+  font-weight: 600;
+}
+
+.ca-locator-pill.no-stock {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #94a3b8;
+  font-weight: normal;
+}
+
+/* ==================================================== */
+/* CA 2-STEP ORDERING & 2-SEGMENT FULFILLMENT STYLES    */
+/* ==================================================== */
+.ca-modal-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.ca-step-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  transition: all 0.2s ease;
+}
+
+.ca-step-badge .step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ca-step-badge.active {
+  background: #f5f3ff;
+  border-color: #c4b5fd;
+  color: #6d28d9;
+  box-shadow: 0 1px 3px rgba(109, 40, 217, 0.1);
+}
+
+.ca-step-badge.active .step-num {
+  background: #7c3aed;
+  color: #ffffff;
+}
+
+.ca-step-badge.completed {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+
+.ca-step-badge.completed .step-num {
+  background: #10b981;
+  color: #ffffff;
+}
+
+.ca-step-arrow {
+  color: #94a3b8;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.ca-step2-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #1e40af;
+  line-height: 1.45;
+  margin-bottom: 12px;
+}
+
+.ca-segments-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 768px) {
+  .ca-segments-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ca-segment-card {
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+}
+
+.ca-segment-card.stock-segment {
+  border: 1.5px solid #a7f3d0;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.05);
+}
+
+.ca-segment-card.purchase-segment {
+  border: 1.5px solid #bfdbfe;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.05);
+}
+
+.ca-segment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+}
+
+.stock-segment .ca-segment-header {
+  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
+  border-bottom: 1px solid #a7f3d0;
+}
+
+.purchase-segment .ca-segment-header {
+  background: linear-gradient(135deg, #eff6ff 0%, #f8faff 100%);
+  border-bottom: 1px solid #bfdbfe;
+}
+
+.ca-seg-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ca-seg-icon {
+  font-size: 18px;
+}
+
+.badge-seg-status {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.badge-seg-status.arrived {
+  background: #10b981;
+  color: #ffffff;
+}
+
+.badge-seg-status.ordered {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.ca-segment-body {
+  padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.segment-table th {
+  font-size: 11px;
+  padding: 6px 10px;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.segment-table td {
+  padding: 8px 10px;
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+.ca-alloc-stock-input,
+.ca-alloc-purchase-input,
+.ca-step1-procure-qty {
+  width: 58px;
+  padding: 4px 6px;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.ca-alloc-stock-input:focus {
+  border-color: #059669;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.2);
+}
+
+.ca-alloc-purchase-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.ca-split-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.ca-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  font-weight: 500;
+  color: #334155;
+}
+
+.ca-summary-chip .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.ca-summary-chip.stock .dot { background: #10b981; }
+.ca-summary-chip.stock strong { color: #047857; }
+
+.ca-summary-chip.purchase .dot { background: #3b82f6; }
+.ca-summary-chip.purchase strong { color: #1d4ed8; }
+
+.ca-summary-chip.cost {
+  margin-left: auto;
+  border-color: #cbd5e1;
+}
+.ca-summary-chip.cost strong {
+  font-family: var(--font-mono);
+  color: #0f172a;
+}
+

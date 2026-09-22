@@ -10,9 +10,11 @@
     "electron:dev": "electron . --dev",
     "server": "node server/server.js",
     "server:dev": "node --watch server/server.js",
-    "build:exe": "electron-builder --win portable",
-    "dist": "electron-builder --win",
-    "pack": "electron-builder --dir",
+    "build:exe": "npm run client:build && electron-builder --win portable",
+    "client:dev": "npm --prefix client run dev",
+    "client:build": "npm --prefix client run build",
+    "dist": "npm run client:build && electron-builder --win",
+    "pack": "npm run client:build && electron-builder --dir",
     "test": "node test/testRunner.js"
   },
   "dependencies": {
@@ -39,6 +41,8 @@
   "build": {
     "appId": "com.honda.serviceticket",
     "productName": "Honda Service Ticket SLA",
+    "electronDist": "node_modules/electron/dist",
+    "electronVersion": "44.3.0",
     "directories": {
       "output": "dist"
     },
@@ -51,6 +55,7 @@
     "files": [
       "electron/**/*",
       "server/**/*",
+      "client/dist/**/*",
       "public/**/*",
       "config/**/*",
       "package.json"

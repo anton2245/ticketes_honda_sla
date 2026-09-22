@@ -1,10 +1,15 @@
 // Electron Main Process for Honda Service Ticketing Desktop Application
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification: ElectronNotification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { startServer, stopServer } = require('../server/server');
 const { buildAppMenu } = require('./menu');
+
+// Set Windows AppUserModelId for reliable OS toast notifications in Action Center
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.honda.serviceticket');
+}
 
 let mainWindow = null;
 let serverInstance = null;
@@ -206,6 +211,31 @@ ipcMain.on('app:reload', () => {
 ipcMain.on('app:toggle-devtools', () => {
   if (mainWindow && !mainWindow.isDestroyed() && isDev) {
     mainWindow.webContents.toggleDevTools();
+  }
+});
+
+ipcMain.on('desktop:notify', (event, { title, body, ticketId, type }) => {
+  try {
+    if (ElectronNotification && ElectronNotification.isSupported()) {
+      const iconPath = path.join(__dirname, 'icon.png');
+      const notif = new ElectronNotification({
+        title: title || 'Honda Service Desk',
+        body: body || 'You have a new update in Honda Service App',
+        icon: fs.existsSync(iconPath) ? iconPath : undefined,
+        silent: false
+      });
+      notif.on('click', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+          mainWindow.webContents.send('notification:open-ticket', { ticketId, type });
+        }
+      });
+      notif.show();
+    }
+  } catch (err) {
+    console.warn('[Electron] Desktop notification dispatch error:', err.message);
   }
 });
 

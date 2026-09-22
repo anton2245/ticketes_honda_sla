@@ -31,7 +31,7 @@
       <div class="brand-badge">
         <span class="brand-h">H</span>
         <div class="brand-title">
-          <h1>HONDA <span>SERVICE</span> <span class="app-version-chip">DESKTOP v2.4</span></h1>
+          <h1>HONDA <span>SERVICE</span> <!-- <span class="app-version-chip">DESKTOP v2.4</span> --></h1>
         </div>
       </div>
     </div>
@@ -1265,11 +1265,14 @@
 
               <!-- VIEW 2: High-Density Compact Details Table -->
               <div id="partsTableContainer" class="parts-table-view-wrap" style="display: none;">
-                <div class="parts-table-header-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 4px 2px;">
+                <div class="parts-table-header-bar"
+                  style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 4px 2px;">
                   <div style="font-size: 12.5px; color: #64748b; font-weight: 500;" id="partsTableSubtext">
                     High-density inventory catalog with warehouse locators and multi-batch stock.
                   </div>
-                  <button type="button" class="btn btn-xs btn-outline" id="btnExportPartsCsv" title="Export catalog to CSV" style="display: inline-flex; align-items: center; gap: 5px; font-weight: 600; font-size: 11.5px; padding: 3px 8px;">
+                  <button type="button" class="btn btn-xs btn-outline" id="btnExportPartsCsv"
+                    title="Export catalog to CSV"
+                    style="display: inline-flex; align-items: center; gap: 5px; font-weight: 600; font-size: 11.5px; padding: 3px 8px;">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                       <polyline points="7 10 12 15 17 10"></polyline>
@@ -1300,8 +1303,10 @@
                 <div class="table-pagination-footer" id="partsTablePaginationFooter" style="margin-top: 12px;">
                   <div class="tp-pagination-info" id="partsTablePaginationInfo">Showing 0–0 of 0 parts</div>
                   <div class="tp-pagination-controls">
-                    <div class="tv-tool-item" style="margin-right: 12px; display: inline-flex; align-items: center; gap: 5px;">
-                      <label for="partsTablePageSize" class="tv-label" style="font-size: 11.5px; color: #64748b; margin: 0;">Show:</label>
+                    <div class="tv-tool-item"
+                      style="margin-right: 12px; display: inline-flex; align-items: center; gap: 5px;">
+                      <label for="partsTablePageSize" class="tv-label"
+                        style="font-size: 11.5px; color: #64748b; margin: 0;">Show:</label>
                       <select id="partsTablePageSize" class="form-select select-compact"
                         style="height: 28px; line-height: 26px; padding-top: 0; padding-bottom: 0; font-size: 11.5px;">
                         <option value="25" selected>25</option>
@@ -1310,9 +1315,11 @@
                         <option value="ALL">All</option>
                       </select>
                     </div>
-                    <button type="button" class="btn-page-nav" id="btnPartsTablePrevPage" title="Previous Page">‹ Prev</button>
+                    <button type="button" class="btn-page-nav" id="btnPartsTablePrevPage" title="Previous Page">‹
+                      Prev</button>
                     <div class="tp-page-numbers" id="partsTablePageNumbers"></div>
-                    <button type="button" class="btn-page-nav" id="btnPartsTableNextPage" title="Next Page">Next ›</button>
+                    <button type="button" class="btn-page-nav" id="btnPartsTableNextPage" title="Next Page">Next
+                      ›</button>
                   </div>
                 </div>
               </div>
@@ -3342,6 +3349,14 @@
       </svg>
       <span>Parts (Add & Mark Arrived)</span>
     </button>
+    <button type="button" class="context-menu-item" id="ctxActionPartsApproval" style="display: none;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 11l3 3L22 4"></path>
+        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+      </svg>
+      <span>Parts Approval</span>
+    </button>
     <button type="button" class="context-menu-item" id="ctxActionPartsArrivalDetails" style="display: none;">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
         stroke-linecap="round" stroke-linejoin="round">
@@ -3722,19 +3737,6 @@
               id="paStatArrived">0</span></div>
         </div>
 
-        <!-- Exemption Banner / Toggle -->
-        <div class="pa-exemption-card">
-          <label class="pa-checkbox-label">
-            <input type="checkbox" id="paExemptCheckbox">
-            <span class="pa-checkbox-custom"></span>
-            <div class="pa-exemption-info">
-              <span class="title">Workshop Exemption (Order & Start Work without Customer Pre-Approval)</span>
-              <span class="desc">Enable to proceed with parts ordering and workshop repairs without waiting for customer
-                sign-off. Customer approvals can be gathered later.</span>
-            </div>
-          </label>
-        </div>
-
         <!-- Parts Table -->
         <div class="pa-table-wrapper"
           style="margin-top: 14px; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
@@ -3815,6 +3817,266 @@
           <button type="button" class="btn btn-outline" id="btnCancelPartsApproval">Cancel</button>
           <button type="button" class="btn btn-primary" id="btnSavePartsApproval">Save Changes</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DEDICATED PCA APPROVAL MODAL (Customer Approval vs Claim) -->
+  <div id="modalPcaResolution" class="modal-overlay" style="display: none;">
+    <div class="modal modal-lg" style="max-width: 840px; width: 95%;">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon-badge" style="background: #fffbeb; color: #b45309;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+          </div>
+          <div>
+            <h3 id="pcaModalTitle">Resolve Pending Customer Approvals (PCA)</h3>
+            <p class="modal-sub" id="pcaModalSubtitle">Review parts requiring approval — choose Customer Approval or Claim coverage</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close" id="btnClosePcaModal">&times;</button>
+      </div>
+
+      <div class="modal-body" style="padding: 16px 22px; max-height: 75vh; overflow-y: auto;">
+        <!-- Quick Batch Actions Ribbon -->
+        <div class="pca-quick-actions-bar">
+          <div class="pca-summary-stat">
+            <span class="label">Total Pending Approval:</span>
+            <span class="val" id="pcaModalPendingCount">0 qty</span>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-xs btn-outline" id="btnPcaApproveAllCustomer" title="Approve all pending qty under Customer out-of-pocket payment">
+              👤 Approve All for Customer (CA)
+            </button>
+            <button type="button" class="btn btn-xs btn-outline" id="btnPcaCoverAllClaim" title="Cover all pending qty under Insurance Claim">
+              🛡️ Cover All under Claim (Insurance)
+            </button>
+          </div>
+        </div>
+
+        <!-- Pending Parts Table -->
+        <div class="pca-table-wrapper" style="margin-top: 12px; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+          <table class="compact-data-table" style="width: 100%;">
+            <thead style="background: var(--bg-surface-alt, #f8fafc);">
+              <tr>
+                <th style="min-width: 180px;">Part Item & SKU</th>
+                <th style="text-align: center; width: 60px;">Total</th>
+                <th style="text-align: center; width: 80px;" title="Covered by Insurance">Claim Qty</th>
+                <th style="text-align: center; width: 80px;" title="Customer Approved">CA Qty</th>
+                <th style="text-align: center; width: 90px; color: #b45309;">Pending Qty</th>
+                <th style="min-width: 230px; text-align: center;">Approval Decision</th>
+              </tr>
+            </thead>
+            <tbody id="pcaPartsTableBody">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 11.5px; color: var(--text-muted);">
+          Selecting Customer Approval moves parts to <strong>CA</strong>. Claim coverage marks them <strong>Insurance Approved</strong>.
+        </span>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn btn-outline" id="btnCancelPcaModal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnSavePcaModal">Apply & Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DEDICATED CA PURCHASE & STOCK ALLOCATION MODAL (2-STEP WORKFLOW) -->
+  <div id="modalCaPurchase" class="modal-overlay" style="display: none;">
+    <div class="modal modal-lg" style="max-width: 950px; width: 95%;">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon-badge" style="background: #ede9fe; color: #6d28d9;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="9" cy="21" r="1"></circle>
+              <circle cx="20" cy="21" r="1"></circle>
+              <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+            </svg>
+          </div>
+          <div>
+            <h3 id="caModalTitle">Order Customer Approved Parts (CA)</h3>
+            <p class="modal-sub" id="caModalSubtitle">Review stock availability and split fulfillment between warehouse stock & supplier orders</p>
+          </div>
+        </div>
+        <button type="button" class="modal-close" id="btnCloseCaModal">&times;</button>
+      </div>
+
+      <!-- Step Indicator Ribbon -->
+      <div class="ca-modal-stepper">
+        <div class="ca-step-badge active" id="caStepBadge1">
+          <span class="step-num">1</span>
+          <span class="step-text">Review Approved & Stock</span>
+        </div>
+        <div class="ca-step-arrow">&rarr;</div>
+        <div class="ca-step-badge" id="caStepBadge2">
+          <span class="step-num">2</span>
+          <span class="step-text">Allocate Stock & Purchase (2 Segments)</span>
+        </div>
+      </div>
+
+      <div class="modal-body" style="padding: 14px 20px; max-height: 72vh; overflow-y: auto;">
+        <!-- ==================== STEP 1: REVIEW APPROVED & STOCK ==================== -->
+        <div id="caStep1Container">
+          <!-- Top Stats Banner -->
+          <div class="ca-purchase-ribbon">
+            <div class="ca-stat-item">
+              <span class="label">Customer Approved:</span>
+              <span class="val" id="caModalApprovedQty">0 qty</span>
+            </div>
+            <div class="ca-stat-item in-stock">
+              <span class="label">Available in Stock:</span>
+              <span class="val" id="caModalInStockQty">0 qty</span>
+            </div>
+            <div class="ca-stat-item pending">
+              <span class="label">Balance to Procure:</span>
+              <span class="val" id="caModalAwaitingOrderQty">0 qty</span>
+            </div>
+          </div>
+
+          <!-- Parts Review Table -->
+          <div class="ca-table-wrapper" style="margin-top: 10px; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+            <table class="compact-data-table" style="width: 100%;">
+              <thead style="background: var(--bg-surface-alt, #f8fafc);">
+                <tr>
+                  <th style="min-width: 190px;">Customer Approved Part</th>
+                  <th style="text-align: center; width: 85px;">CA Qty</th>
+                  <th style="text-align: center; min-width: 140px;">Current Stock & Locator</th>
+                  <th style="text-align: center; width: 110px;">To Order Qty</th>
+                  <th style="text-align: center; min-width: 130px;">Recommendation</th>
+                </tr>
+              </thead>
+              <tbody id="caPartsTableBody">
+                <!-- Rendered dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ==================== STEP 2: 2-SEGMENT FULFILLMENT ==================== -->
+        <div id="caStep2Container" style="display: none;">
+          <div class="ca-step2-notice">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0; color: #2563eb;">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="16" x2="12" y2="12"></line>
+              <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </svg>
+            <div>
+              <strong>Allocate items across 2 fulfillment channels:</strong>
+              Items allocated from stock are immediately marked <strong>ARRIVED</strong>. Remaining items are ordered from suppliers and marked <strong>ORDERED</strong>. All changes reflect live on the <strong>PARTS Order table</strong>.
+            </div>
+          </div>
+
+          <div class="ca-segments-grid">
+            <!-- SEGMENT 1: TAKE FROM STOCK -->
+            <div class="ca-segment-card stock-segment">
+              <div class="ca-segment-header">
+                <div class="ca-seg-title">
+                  <span class="ca-seg-icon">📦</span>
+                  <div>
+                    <h4 style="margin: 0; font-size: 13.5px; font-weight: 700; color: #065f46;">Segment 1: Take from Stock</h4>
+                    <span style="font-size: 11px; color: #047857;">Workshop Warehouse Inventory</span>
+                  </div>
+                </div>
+                <span class="badge-seg-status arrived">Marked ARRIVED</span>
+              </div>
+              <div class="ca-segment-body">
+                <table class="compact-data-table segment-table" style="width: 100%;">
+                  <thead>
+                    <tr>
+                      <th>Part Item</th>
+                      <th style="text-align: center; width: 100px;">Available</th>
+                      <th style="text-align: center; width: 110px;">Take from Stock (qty)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="caStockSegmentList">
+                    <!-- Rendered dynamically -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- SEGMENT 2: PURCHASE / ORDER -->
+            <div class="ca-segment-card purchase-segment">
+              <div class="ca-segment-header">
+                <div class="ca-seg-title">
+                  <span class="ca-seg-icon">🛒</span>
+                  <div>
+                    <h4 style="margin: 0; font-size: 13.5px; font-weight: 700; color: #1e40af;">Segment 2: Purchase (Supplier)</h4>
+                    <span style="font-size: 11px; color: #1d4ed8;">External Supplier Purchase Order</span>
+                  </div>
+                </div>
+                <span class="badge-seg-status ordered">Marked ORDERED</span>
+              </div>
+              <div class="ca-segment-body">
+                <table class="compact-data-table segment-table" style="width: 100%;">
+                  <thead>
+                    <tr>
+                      <th>Part Item</th>
+                      <th style="text-align: center; width: 90px;">Est. Cost</th>
+                      <th style="text-align: center; width: 110px;">Purchase (qty)</th>
+                    </tr>
+                  </thead>
+                  <tbody id="caPurchaseSegmentList">
+                    <!-- Rendered dynamically -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Summary Bar -->
+          <div class="ca-split-summary-bar">
+            <div class="ca-summary-chip stock">
+              <span class="dot"></span>
+              <span>Take from Stock: <strong id="caSummaryStockTotal">0</strong> pcs</span>
+            </div>
+            <div class="ca-summary-chip purchase">
+              <span class="dot"></span>
+              <span>Purchase Orders: <strong id="caSummaryPurchaseTotal">0</strong> pcs</span>
+            </div>
+            <div class="ca-summary-chip cost">
+              <span>Total Est. Purchase: <strong id="caSummaryPurchaseCost">₹0</strong></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 1 FOOTER -->
+      <div class="modal-footer" id="caFooterStep1" style="display: flex; justify-content: space-between; align-items: center;">
+        <button type="button" class="btn btn-outline" id="btnCancelCaModal">Close</button>
+        <button type="button" class="btn btn-primary" id="btnCaProceedStep2" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
+          Proceed to Fulfillment
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </button>
+      </div>
+
+      <!-- STEP 2 FOOTER -->
+      <div class="modal-footer" id="caFooterStep2" style="display: none; justify-content: space-between; align-items: center;">
+        <button type="button" class="btn btn-outline" id="btnCaBackStep1" style="display: inline-flex; align-items: center; gap: 6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+          </svg>
+          Back to Review
+        </button>
+        <button type="button" class="btn btn-primary" id="btnCaConfirmFulfill" style="font-weight: 700; background: #059669; border-color: #059669; display: inline-flex; align-items: center; gap: 6px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          Confirm & Fulfill Parts Orders
+        </button>
       </div>
     </div>
   </div>
